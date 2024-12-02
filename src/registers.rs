@@ -1,7 +1,7 @@
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(Clone, Copy, serde::Serialize, PartialEq, Eq)]
 pub struct DataType {
-    pub scale: u8,
-    pub signed: bool,
+    scale: u8,
+    signed: bool,
 }
 
 impl DataType {
@@ -10,18 +10,24 @@ impl DataType {
     pub const I16: Self = Self { scale: 1, signed: true };
     pub const CEL: Self = Self { scale: 10, signed: true };
     pub const SPH: Self = Self { scale: 10, signed: false };
-}
 
-// impl serde::Serialize for DataType {
-//     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-//         serializer.serialize_str(match *self {
-//             DataType::U16 => "U / 1",
-//             DataType::I16 => "S / 1",
-//             DataType::Celsius => "S / 10",
-//             DataType::SpecificHumidity => "U / 10",
-//         })
-//     }
-// }
+    pub fn from_bytes<'a>(self, mut bs: &'a [u8]) -> impl Iterator<Item = Value> + 'a {
+        std::iter::from_fn(move || {
+            let (v, remainder) = bs.split_first_chunk::<2>()?;
+            bs = remainder;
+            Some(match self {
+                Self::I16 => Value::I16(i16::from_be_bytes(*v)),
+                Self::U16 => Value::U16(u16::from_be_bytes(*v)),
+                Self::CEL => Value::Celsius(i16::from_be_bytes(*v)),
+                Self::SPH => Value::SpecificHumidity(u16::from_be_bytes(*v)),
+                _ => panic!("malformed DataType"),
+            })
+        })
+    }
+
+    pub fn is_signed(&self) -> bool { self.signed }
+    pub fn scale(&self) -> u8 { self.scale }
+}
 
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -880,8 +886,14 @@ for_each_register!(make_lists);
 pub static DESCRIPTIONS: &[&str] = &const {
     let mut result = [""; ADDRESSES.len()];
     let mut index = 0;
+    let mut previous_address = 0;
     while index < result.len() {
-        result[index] = match ADDRESSES[index] {
+        let address = ADDRESSES[index];
+        if address <= previous_address {
+            panic!("ADDRESSES is not sorted (or has duplicate values)!");
+        }
+        previous_address = address;
+        result[index] = match address {
             1001 => "Highest value of all RH sensors",
             1002 => "Highest value of all CO2 sensors",
             1011 => "Set point for RH demand control",
