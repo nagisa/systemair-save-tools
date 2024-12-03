@@ -1,8 +1,4 @@
-use crate::registers::DataType;
-
 pub mod registers {
-    use std::path::PathBuf;
-
     use crate::registers::{Mode, Value};
 
     #[derive(clap::ValueEnum, Clone, Debug)]
@@ -15,25 +11,19 @@ pub mod registers {
     /// Search and output known modbus registers.
     #[derive(clap::Parser)]
     pub struct Args {
-        #[arg(long, short='f', value_enum, default_value_t = Format::Table)]
-        format: Format,
         filter: Option<String>,
-        #[arg(long, short = 'o')]
-        file: Option<PathBuf>,
+        #[clap(flatten)]
+        output: crate::output::Args,
     }
 
     #[derive(thiserror::Error, Debug)]
     pub enum Error {
-        #[error("could not open the specified output file at {1:?}")]
-        OpenOutputFile(#[source] std::io::Error, PathBuf),
-        #[error("could not write data to the output file at {1:?}")]
-        WriteFile(#[source] std::io::Error, PathBuf),
-        #[error("could not write data to the terminal")]
-        WriteStdout(#[source] std::io::Error),
-        #[error("could not serialize registers to JSON")]
-        SerializeJson(#[source] serde_json::Error),
-        #[error("could not serialize registers to CSV")]
-        SerializeCsv(#[source] csv::Error),
+        #[error(transparent)]
+        CreateOutput(crate::output::Error),
+        #[error(transparent)]
+        WriteOutput(crate::output::Error),
+        #[error(transparent)]
+        CommitOutput(crate::output::Error),
     }
 
     #[derive(serde::Serialize)]
@@ -97,81 +87,56 @@ pub mod registers {
     }
 
     pub fn run(args: Args) -> Result<(), Error> {
-        let mut output_writer: Box<dyn std::io::Write> = match &args.file {
-            None => Box::new(std::io::stdout().lock()) as Box<_>,
-            Some(path) => Box::new(
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(path)
-                    .map_err(|e| Error::OpenOutputFile(e, path.clone()))?,
-            ) as Box<_>,
-        };
-
-        let data = match args.format {
-            Format::Table => {
-                let mut table = comfy_table::Table::new();
-                let header = vec![
-                    "Address",
-                    "Name",
-                    "Mode",
-                    "Type",
-                    "Scale",
-                    "Min",
-                    "Max",
-                    "Description",
-                ];
-                table
-                    .set_header(header)
-                    .set_content_arrangement(comfy_table::ContentArrangement::Dynamic);
-                for register in RegisterSchema::all_registers() {
-                    if let Some(pattern) = &args.filter {
-                        if !register.is_match(&pattern) {
-                            continue;
-                        }
-                    }
-                    table.add_row(vec![
-                        register.address.to_string(),
-                        register.name.to_string(),
-                        register.mode.to_string(),
-                        if register.signed {
-                            "i16".to_string()
-                        } else {
-                            "u16".to_string()
-                        },
-                        register.scale.to_string(),
-                        register.minimum.map(|v| v.to_string()).unwrap_or_default(),
-                        register.maximum.map(|v| v.to_string()).unwrap_or_default(),
-                        register.description.to_string(),
-                    ]);
+        let mut output = args.output.to_output().map_err(Error::CreateOutput)?;
+        output
+            .table_headers(vec![
+                "Address",
+                "Name",
+                "Mode",
+                "Type",
+                "Scale",
+                "Min",
+                "Max",
+                "Description",
+            ])
+            .map_err(Error::WriteOutput)?;
+        for register in RegisterSchema::all_registers() {
+            if let Some(pattern) = &args.filter {
+                if !register.is_match(&pattern) {
+                    continue;
                 }
-                table.to_string().into_bytes()
             }
-            Format::Json => {
-                let value = RegisterSchema::all_registers().collect::<Vec<_>>();
-                serde_json::to_vec(&value).map_err(Error::SerializeJson)?
-            }
-            Format::Csv => {
-                let mut bytes = Vec::new();
-                let mut writer = csv::Writer::from_writer(&mut bytes);
-                for register in RegisterSchema::all_registers() {
-                    writer.serialize(register).map_err(Error::SerializeCsv)?;
-                }
-                drop(writer);
-                bytes
-            }
-        };
-        output_writer.write(&data).map_err(|e| match args.file {
-            None => Error::WriteStdout(e),
-            Some(p) => Error::WriteFile(e, p),
-        })?;
-        Ok(())
+            let register = &register;
+            output
+                .result(
+                    || {
+                        vec![
+                            register.address.to_string(),
+                            register.name.to_string(),
+                            register.mode.to_string(),
+                            if register.signed {
+                                "i16".to_string()
+                            } else {
+                                "u16".to_string()
+                            },
+                            register.scale.to_string(),
+                            register.minimum.map(|v| v.to_string()).unwrap_or_default(),
+                            register.maximum.map(|v| v.to_string()).unwrap_or_default(),
+                            register.description.to_string(),
+                        ]
+                    },
+                    || register,
+                )
+                .map_err(Error::WriteOutput)?;
+        }
+        output.commit().map_err(Error::CommitOutput)
     }
 }
 
 pub mod read {
-    use crate::connection::{Connection, ConnectionArgs};
-    use crate::modbus::{Operation, Request, Response, ResponseKind};
+    use crate::connection::{self, Connection};
+    use crate::modbus::{Operation, Request, ResponseKind};
+    use crate::output;
     use crate::registers::{DataType, ADDRESSES, DATA_TYPES, NAMES};
     use futures::{StreamExt as _, TryStreamExt};
     use std::collections::VecDeque;
@@ -189,14 +154,14 @@ pub mod read {
     /// Read the value stored in the specified register.
     #[derive(clap::Parser)]
     pub struct Args {
-        #[arg(long, short='f', value_enum, default_value_t = Format::Table)]
-        format: Format,
         #[arg(required = true)]
         registers: Vec<String>,
         #[arg(long, short = 'i', default_value = "1")]
         device_id: u8,
         #[clap(flatten)]
-        connection: ConnectionArgs,
+        connection: connection::Args,
+        #[clap(flatten)]
+        output: output::Args,
     }
 
     #[derive(thiserror::Error, Debug)]
@@ -209,6 +174,23 @@ pub mod read {
         RegisterNotFound(String),
         #[error("communication with the device failed")]
         Communicate(#[source] crate::connection::Error),
+        #[error(transparent)]
+        CreateOutput(crate::output::Error),
+        #[error(transparent)]
+        WriteOutput(crate::output::Error),
+        #[error(transparent)]
+        CommitOutput(crate::output::Error),
+    }
+
+    #[derive(serde::Serialize)]
+    struct OutputSchema {
+        address: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        values: Option<Vec<crate::registers::Value>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exception: Option<u8>,
     }
 
     pub fn run(args: Args) -> Result<(), Error> {
@@ -232,6 +214,10 @@ pub mod read {
             .build()
             .map_err(Error::CreateAsyncRuntime)?;
         rt.block_on(async move {
+            let mut output = args.output.to_output().map_err(Error::CreateOutput)?;
+            let heads = vec!["Tx ID", "Address", "Name", "Response"];
+            output.table_headers(heads).map_err(Error::WriteOutput)?;
+
             let connection = Connection::new(args.connection).await.unwrap();
             let mut stream = futures::stream::iter(register_indices.iter().enumerate())
                 .map(|(i, (address, regi))| {
@@ -257,43 +243,43 @@ pub mod read {
                     })
                 })
                 .try_buffered(5);
-
-            match args.format {
-                Format::Simple => {
-                    while let Some(response) = stream.next().await {
-                        let (address, regi, response) = response?;
-                        let (dt, name) = regi
-                            .map(|r| (DATA_TYPES[r], NAMES[r]))
-                            .unwrap_or((DataType::U16, "???"));
-                        let value = describe_response_kind(&response.kind, dt);
-                        println!(
-                            "{:},{address},{name},{value}",
-                            response.transaction_id
-                        );
-                    }
-                    return Ok(());
-                }
-                Format::Json => {}
-                Format::Table => {
-                    let mut table = comfy_table::Table::new();
-                    let header = vec!["Address", "Name", "Value"];
-                    table
-                        .set_header(header)
-                        .set_content_arrangement(comfy_table::ContentArrangement::Dynamic);
-                    for result in stream.collect::<Vec<_>>().await {
-                        let (address, regi, response) = result?;
-                        let (dt, name) = regi
-                            .map(|r| (DATA_TYPES[r], NAMES[r]))
-                            .unwrap_or((DataType::U16, "???"));
-                        let value = describe_response_kind(&response.kind, dt);
-                        table.add_row(vec![format!("{address}"), format!("{name}"), value]);
-                    }
-                    println!("{table}");
-                }
-                Format::Csv => {}
-            };
-
-            Ok(())
+            while let Some(response) = stream.next().await {
+                let (address, regi, response) = &response?;
+                output
+                    .result(
+                        || {
+                            let (dt, name) = regi
+                                .map(|r| (DATA_TYPES[r], NAMES[r]))
+                                .unwrap_or((DataType::U16, "???"));
+                            let value = describe_response_kind(&response.kind, dt);
+                            vec![
+                                response.transaction_id.to_string(),
+                                address.to_string(),
+                                name.to_string(),
+                                value,
+                            ]
+                        },
+                        || {
+                            let name = regi.map(|r| NAMES[r]);
+                            let address = *address;
+                            let dt = regi.map(|r| DATA_TYPES[r]).unwrap_or(DataType::U16);
+                            let (values, exception) = match &response.kind {
+                                ResponseKind::ErrorCode(e) => (None, Some(*e)),
+                                ResponseKind::GetHoldings { values } => {
+                                    (Some(dt.from_bytes(&values).collect()), None)
+                                }
+                            };
+                            OutputSchema {
+                                address,
+                                name,
+                                values,
+                                exception,
+                            }
+                        },
+                    )
+                    .map_err(Error::WriteOutput)?;
+            }
+            output.commit().map_err(Error::CommitOutput)
         })
     }
 

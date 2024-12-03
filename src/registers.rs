@@ -6,10 +6,22 @@ pub struct DataType {
 
 impl DataType {
     // Convenience aliases for nicely tabulated `for_each_regsiter` macro definition below.
-    pub const U16: Self = Self { scale: 1, signed: false };
-    pub const I16: Self = Self { scale: 1, signed: true };
-    pub const CEL: Self = Self { scale: 10, signed: true };
-    pub const SPH: Self = Self { scale: 10, signed: false };
+    pub const U16: Self = Self {
+        scale: 1,
+        signed: false,
+    };
+    pub const I16: Self = Self {
+        scale: 1,
+        signed: true,
+    };
+    pub const CEL: Self = Self {
+        scale: 10,
+        signed: true,
+    };
+    pub const SPH: Self = Self {
+        scale: 10,
+        signed: false,
+    };
 
     pub fn from_bytes<'a>(self, mut bs: &'a [u8]) -> impl Iterator<Item = Value> + 'a {
         std::iter::from_fn(move || {
@@ -25,14 +37,18 @@ impl DataType {
         })
     }
 
-    pub fn is_signed(&self) -> bool { self.signed }
-    pub fn scale(&self) -> u8 { self.scale }
+    pub fn is_signed(&self) -> bool {
+        self.signed
+    }
+    pub fn scale(&self) -> u8 {
+        self.scale
+    }
 }
 
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(if self.signed { "S/" } else {"U/"})?;
-        f.write_fmt(format_args!("{}",self.scale))?;
+        f.write_str(if self.signed { "S/" } else { "U/" })?;
+        f.write_fmt(format_args!("{}", self.scale))?;
         Ok(())
     }
 }

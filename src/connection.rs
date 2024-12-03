@@ -80,7 +80,8 @@ impl ResponseTracker {
 }
 
 #[derive(clap::Parser)]
-pub struct ConnectionArgs {
+#[group(id = "connection::Args")]
+pub struct Args {
     #[clap(flatten)]
     how: ConnectionGroup,
     /// If the response isn't received in this amount of time, consider the request failed.
@@ -111,7 +112,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn new(args: ConnectionArgs) -> Result<Connection, Error> {
+    pub async fn new(args: Args) -> Result<Connection, Error> {
         let (request_queue, jobs) = tokio::sync::mpsc::unbounded_channel();
         let response_tracker = Default::default();
         let worker = if args.how.tcp.is_some() {
@@ -158,7 +159,7 @@ const TCP_SEND_PERIOD: Duration = Duration::from_millis(25);
 async fn tcp_worker(
     mut jobs: UnboundedReceiver<Request>,
     responses: Arc<ResponseTracker>,
-    args: ConnectionArgs,
+    args: Args,
 ) -> Result<(), Error> {
     let mut inflight_keys = BTreeMap::new();
     let mut inflight = tokio_util::time::delay_queue::DelayQueue::new();
