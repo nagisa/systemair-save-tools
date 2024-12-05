@@ -291,6 +291,11 @@ pub mod read {
                             let Some(result) = outcome else {
                                 continue;
                             };
+                            if let ResponseKind::ErrorCode(6) = result.kind {
+                                // Server was busy to handle this request, retry these too.
+                                // TODO: maybe add a flag to control this?
+                                continue;
+                            }
                             return Ok::<_, Error>((read_request, result));
                         }
                     })
