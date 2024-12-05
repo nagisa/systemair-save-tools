@@ -81,33 +81,30 @@ impl Decoder for ModbusTCPCodec {
                 return Ok(None);
             };
             let required_length = u16::from_be_bytes(*length_buffer);
-            if required_length > u8::MAX.into() {
-                src.advance(1);
-                continue;
-            }
-            if remainder.len() < required_length.into() {
-                return Ok(None);
-            }
             let Some((data, _)) = remainder.split_at_checked(required_length.into()) else {
                 return Ok(None);
             };
-            let [device_id, function_code, byte_count, response @ ..] = data else {
+            let [device_id, function_code, code, response @ ..] = data else {
                 src.advance(1);
                 continue;
             };
-            let (device_id, function_code, byte_count) = (*device_id, *function_code, *byte_count);
+            let (device_id, function_code, code) = (*device_id, *function_code, *code);
             if function_code > 0x80 {
                 src.advance(6 + 3);
                 return Ok(Some(Response {
                     transaction_id,
                     device_id,
-                    kind: ResponseKind::ErrorCode(byte_count),
+                    kind: ResponseKind::ErrorCode(code),
                 }));
             } else {
-                if usize::from(byte_count) != response.len() {
-                    src.advance(1);
-                    continue;
-                }
+                // NOTE: The `code` variable in the case of success might store the length of the
+                // payload. However, the IAM is capable of handling larger responses (such as when
+                // querying large register ranges) than 254 bytes, in which case the value of this
+                // byte is sorta unspecified. We already have a length to consult from the TCP
+                // header, so there kinda isn't any reason to check this byte...
+                //
+                // This is just one of the ways in which SystemAIR Modbus implementation is special
+                // such that using off-shelf parsers doesn't work well.
                 let values = response.to_vec();
                 src.advance(usize::from(required_length) + 6);
                 return Ok(Some(Response {
