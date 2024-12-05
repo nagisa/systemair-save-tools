@@ -45,7 +45,7 @@ impl Encoder<&Request> for ModbusTCPCodec {
             Operation::GetHoldings { address, count } => {
                 dst.extend(req.transaction_id.to_be_bytes());
                 dst.extend(&[0, 0, 0, 0, req.device_id, 3]);
-                dst.extend(address.to_be_bytes());
+                dst.extend((address - 1).to_be_bytes());
                 dst.extend(count.to_be_bytes());
             }
         };
