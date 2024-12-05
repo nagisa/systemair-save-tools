@@ -1,6 +1,6 @@
 use clap::Parser as _;
 use systemair_save_tools::commands;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 #[derive(clap::Parser)]
 #[clap(version, about, author)]
@@ -25,8 +25,13 @@ fn end<E: std::error::Error>(r: Result<(), E>) {
 }
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_env("SYSTEMAIR_SAVE_TOOLS_LOG"))
+    let filter_description = std::env::var("SYSTEMAIR_SAVE_TOOLS_LOG").expect("foo");
+    let filter = filter_description
+        .parse::<tracing_subscriber::filter::targets::Targets>()
+        .expect("foo");
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(filter)
         .init();
     match Commands::parse() {
         Commands::Registers(args) => end(commands::registers::run(args)),
