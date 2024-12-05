@@ -37,11 +37,15 @@ impl DataType {
         })
     }
 
-    pub fn is_signed(&self) -> bool {
+    pub const fn is_signed(&self) -> bool {
         self.signed
     }
-    pub fn scale(&self) -> u8 {
+    pub const fn scale(&self) -> u8 {
         self.scale
+    }
+
+    pub const fn bytes(&self) -> usize {
+        2
     }
 }
 
@@ -120,6 +124,34 @@ impl Mode {
     pub const RW: Self = Self(Self::R.0 | Self::W.0);
     const R_: Self = Self::R;
 }
+
+#[derive(Clone, Copy)]
+pub struct RegisterIndex(usize);
+
+impl RegisterIndex {
+    pub fn from_address(address: u16) -> Option<RegisterIndex> {
+        let index = ADDRESSES.partition_point(|v| *v < address);
+        (ADDRESSES[index] == address).then_some(Self(index))
+    }
+
+    pub fn from_name(name: &str) -> Option<RegisterIndex> {
+        let index = NAMES.into_iter().position(|v| *v == name);
+        index.map(Self)
+    }
+
+    pub fn address(&self) -> u16 {
+        ADDRESSES[self.0]
+    }
+
+    pub fn name(&self) -> &'static str {
+        NAMES[self.0]
+    }
+
+    pub fn data_type(&self) -> DataType {
+        DATA_TYPES[self.0]
+    }
+}
+
 
 macro_rules! for_each_register {
     ($m:ident) => {

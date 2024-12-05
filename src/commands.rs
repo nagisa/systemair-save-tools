@@ -137,10 +137,11 @@ pub mod read {
     use crate::connection::{self, Connection};
     use crate::modbus::{Operation, Request, ResponseKind};
     use crate::output;
-    use crate::registers::{DataType, ADDRESSES, DATA_TYPES, NAMES};
+    use crate::registers::{DataType, RegisterIndex, ADDRESSES, DATA_TYPES, NAMES};
     use futures::{StreamExt as _, TryStreamExt};
     use std::collections::VecDeque;
     use std::fmt::Write as _;
+    use std::num::ParseIntError;
     use tracing::warn;
 
     #[derive(clap::ValueEnum, Clone)]
@@ -170,6 +171,12 @@ pub mod read {
         CreateAsyncRuntime(#[source] std::io::Error),
         #[error("could establish client connection with the device")]
         EstablishClient(#[source] crate::connection::Error),
+        #[error("register range start `{1}` could not be parsed")]
+        RegisterRangeStartParse(#[source] ParseIntError, String),
+        #[error("register range end `{1}` could not be parsed")]
+        RegisterRangeEndParse(#[source] ParseIntError, String),
+        #[error("register range {0}..{1} is empty")]
+        RegisterRangeEmpty(u16, u16),
         #[error("register `{0}` does not match any known register")]
         RegisterNotFound(String),
         #[error("communication with the device failed")]
@@ -193,19 +200,68 @@ pub mod read {
         exception: Option<u8>,
     }
 
+    enum ReadRequest {
+        SingleRegister {
+            address: u16,
+            index: Option<RegisterIndex>,
+        },
+        RegisterRange {
+            address_start: u16,
+            address_end: u16,
+        },
+    }
+
+    impl ReadRequest {
+        fn to_operation(&self) -> Operation {
+            match self {
+                ReadRequest::SingleRegister { address, index: _ } => Operation::GetHoldings {
+                    address: *address,
+                    count: 1,
+                },
+                ReadRequest::RegisterRange {
+                    address_start,
+                    address_end,
+                } => Operation::GetHoldings {
+                    address: *address_start,
+                    count: address_end
+                        .checked_sub(*address_start)
+                        .expect("no overflow"),
+                },
+            }
+        }
+    }
+
     pub fn run(args: Args) -> Result<(), Error> {
         let register_indices = args
             .registers
             .iter()
             .map(|register| {
-                if let Ok(reg_address) = register.parse::<u16>() {
-                    let index = ADDRESSES.partition_point(|v| *v < reg_address);
-                    if ADDRESSES[index] != reg_address {
-                        warn!(message = "register address unknown", reg_address);
-                        return Ok((reg_address, None));
-                    }
-                    return Ok((reg_address, Some(index)));
+                if let Ok(address) = register.parse::<u16>() {
+                    let index = RegisterIndex::from_address(address);
+                    return Ok(ReadRequest::SingleRegister { address, index });
                 }
+                if let Some((l, r)) = register.split_once("..") {
+                    let address_start = l
+                        .parse::<u16>()
+                        .map_err(|e| Error::RegisterRangeStartParse(e, l.to_string()))?;
+                    let address_end = r
+                        .parse::<u16>()
+                        .map_err(|e| Error::RegisterRangeEndParse(e, r.to_string()))?;
+                    if address_end <= address_start {
+                        return Err(Error::RegisterRangeEmpty(address_start, address_end));
+                    }
+                    return Ok(ReadRequest::RegisterRange {
+                        address_start,
+                        address_end,
+                    });
+                }
+                if let Some(i) = RegisterIndex::from_name(register) {
+                    return Ok(ReadRequest::SingleRegister {
+                        address: i.address(),
+                        index: Some(i),
+                    });
+                }
+
                 Err(Error::RegisterNotFound(register.clone()))
             })
             .collect::<Result<VecDeque<_>, _>>()?;
@@ -220,7 +276,7 @@ pub mod read {
 
             let connection = Connection::new(args.connection).await.unwrap();
             let mut stream = futures::stream::iter(register_indices.iter().enumerate())
-                .map(|(i, (address, regi))| {
+                .map(|(i, read_request)| {
                     let connection = &connection;
                     Ok::<_, Error>(async move {
                         loop {
@@ -228,71 +284,81 @@ pub mod read {
                                 .send(Request {
                                     device_id: 1,
                                     transaction_id: i as u16,
-                                    operation: Operation::GetHoldings {
-                                        address: *address,
-                                        count: 1,
-                                    },
+                                    operation: read_request.to_operation(),
                                 })
                                 .await
                                 .map_err(Error::Communicate)?;
                             let Some(result) = outcome else {
                                 continue;
                             };
-                            return Ok::<_, Error>((*address, *regi, result));
+                            return Ok::<_, Error>((read_request, result));
                         }
                     })
                 })
                 .try_buffered(5);
             while let Some(response) = stream.next().await {
-                let (address, regi, response) = &response?;
-                output
-                    .result(
-                        || {
-                            let (dt, name) = regi
-                                .map(|r| (DATA_TYPES[r], NAMES[r]))
-                                .unwrap_or((DataType::U16, "???"));
-                            let value = describe_response_kind(&response.kind, dt);
-                            vec![
-                                response.transaction_id.to_string(),
-                                address.to_string(),
-                                name.to_string(),
-                                value,
-                            ]
-                        },
-                        || {
-                            let name = regi.map(|r| NAMES[r]);
-                            let address = *address;
-                            let dt = regi.map(|r| DATA_TYPES[r]).unwrap_or(DataType::U16);
-                            let (values, exception) = match &response.kind {
-                                ResponseKind::ErrorCode(e) => (None, Some(*e)),
-                                ResponseKind::GetHoldings { values } => {
-                                    (Some(dt.from_bytes(&values).collect()), None)
+                let (read_request, response) = &response?;
+                let responses = match read_request {
+                    ReadRequest::SingleRegister { address, index } => vec![(*address, *index, 0)],
+                    ReadRequest::RegisterRange {
+                        address_start,
+                        address_end,
+                    } => (*address_start..*address_end)
+                        .zip((0..).step_by(2))
+                        .map(|(address, value_offset)| {
+                            (address, RegisterIndex::from_address(address), value_offset)
+                        })
+                        .collect(),
+                };
+                for (address, register_index, value_offset) in responses {
+                    output
+                        .result(
+                            || {
+                                let (dt, name) = register_index
+                                    .map(|r| (r.data_type(), r.name()))
+                                    .unwrap_or((DataType::U16, "???"));
+                                let value = match &response.kind {
+                                    ResponseKind::ErrorCode(c) => format!("server exception {c}"),
+                                    ResponseKind::GetHoldings { values } => {
+                                        let mut buf = String::new();
+                                        let range = value_offset..(value_offset + dt.bytes());
+                                        for value in dt.from_bytes(&values[range]) {
+                                            buf.write_fmt(format_args!("{} ", value)).unwrap();
+                                        }
+                                        buf
+                                    }
+                                };
+                                vec![
+                                    response.transaction_id.to_string(),
+                                    address.to_string(),
+                                    name.to_string(),
+                                    value,
+                                ]
+                            },
+                            || {
+                                let name = register_index.map(|r| r.name());
+                                let dt = register_index
+                                    .map(|r| r.data_type())
+                                    .unwrap_or(DataType::U16);
+                                let (values, exception) = match &response.kind {
+                                    ResponseKind::ErrorCode(e) => (None, Some(*e)),
+                                    ResponseKind::GetHoldings { values } => {
+                                        let range = value_offset..(value_offset + dt.bytes());
+                                        (Some(dt.from_bytes(&values[range]).collect()), None)
+                                    }
+                                };
+                                OutputSchema {
+                                    address,
+                                    name,
+                                    values,
+                                    exception,
                                 }
-                            };
-                            OutputSchema {
-                                address,
-                                name,
-                                values,
-                                exception,
-                            }
-                        },
-                    )
-                    .map_err(Error::WriteOutput)?;
+                            },
+                        )
+                        .map_err(Error::WriteOutput)?;
+                }
             }
             output.commit().map_err(Error::CommitOutput)
         })
-    }
-
-    fn describe_response_kind(rk: &ResponseKind, dt: DataType) -> String {
-        match rk {
-            ResponseKind::ErrorCode(c) => format!("server exception {c}"),
-            ResponseKind::GetHoldings { values } => {
-                let mut buf = String::new();
-                for value in dt.from_bytes(&values) {
-                    buf.write_fmt(format_args!("{}, ", value)).unwrap();
-                }
-                buf
-            }
-        }
     }
 }
