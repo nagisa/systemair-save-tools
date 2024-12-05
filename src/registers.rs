@@ -152,7 +152,6 @@ impl RegisterIndex {
     }
 }
 
-
 macro_rules! for_each_register {
     ($m:ident) => {
         $m! {

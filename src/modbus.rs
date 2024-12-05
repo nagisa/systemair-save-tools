@@ -9,6 +9,22 @@ pub struct Request {
     pub operation: Operation,
 }
 
+impl Request {
+    /// Estimate how many bytes of response will be necessary to respond to this request.
+    ///
+    /// This is used to calculate send slots on a connection in an effort to avoid predictable
+    /// "Server Busy" exceptions or loss of requests.
+    pub fn expected_response_length(&self) -> u16 {
+        let bytes_total = match self.operation {
+            Operation::GetHoldings { address: _, count } => u32::from(count) * 2,
+        };
+        let rtu_blocks = (bytes_total + 0xFE) / 0xFF;
+        // 1 byte no padding, 2 bytes crc, 2 bytes address and function.
+        let rtu_bytes = rtu_blocks * 5 + bytes_total;
+        u16::try_from(rtu_bytes).unwrap_or(u16::MAX)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Operation {
     GetHoldings { address: u16, count: u16 },

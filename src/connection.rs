@@ -2,6 +2,7 @@ use crate::modbus::{ModbusTCPCodec, Request, Response};
 use futures::{SinkExt as _, StreamExt as _};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
@@ -84,14 +85,26 @@ impl ResponseTracker {
 pub struct Args {
     #[clap(flatten)]
     how: ConnectionGroup,
-    /// If the response isn't received in this amount of time, consider the request failed.
+    /// If the response isn't received in this amount of time plus the expected internal read-out
+    /// time, consider the request failed.
     ///
-    /// Most of the commands will at this point will attempt to retry the request.
+    /// Most of the commands will at that point attempt to retry the request.
     #[arg(long, default_value = "1s")]
     read_timeout: humantime::Duration,
+
     /// Reconnect to the server after the specified number of requests timeout.
-    #[arg(long, default_value = "5")]
+    #[arg(long, default_value = "3")]
     reconnect_after_timeouts: usize,
+
+    /// The baudrate configured for the SAVE device which this tool will use to pace requests.
+    ///
+    /// See `registers modbus`.
+    #[arg(long, default_value = "9600")]
+    baudrate: u32,
+
+    /// The amount of additional time to wait between sending requests over TCP.
+    #[arg(long, default_value = "25ms")]
+    tcp_send_delay: humantime::Duration,
 }
 
 #[derive(clap::Parser)]
@@ -154,8 +167,6 @@ impl Connection {
     }
 }
 
-const TCP_SEND_PERIOD: Duration = Duration::from_millis(25);
-
 async fn tcp_worker(
     mut jobs: UnboundedReceiver<Request>,
     responses: Arc<ResponseTracker>,
@@ -184,50 +195,15 @@ async fn tcp_worker(
         let nodelay_result = socket.set_nodelay(true);
         trace!(message = "setting nodelay", is_error = ?nodelay_result.err());
         let mut io = Framed::new(socket, ModbusTCPCodec {});
-        // We need to have some down time between sending out subsequent modbus requests --
-        // otherwise the IAM device gets somewhat confused and will ignore some of the commands,
-        // leading them to time out.
-        let mut next_send_slot = Instant::now();
         let mut sequential_timeout_countdown = args.reconnect_after_timeouts;
+        let mut send_slot_sleeper = pin::pin!(tokio::time::sleep_until(Instant::now()));
         loop {
+            let send_slot_available = send_slot_sleeper.is_elapsed();
             tokio::select! {
-                Some(expired) = inflight.next() => {
-                    let transaction_id: u16 = expired.into_inner();
-                    inflight_keys.remove(&transaction_id);
-                    debug!(message = "an inflight request timed out", transaction_id);
-                    responses.mark_timeout(transaction_id);
-                    if let Some(new_count) = sequential_timeout_countdown.checked_sub(1) {
-                        sequential_timeout_countdown = new_count;
-                    } else {
-                        continue 'reconnect
-                    };
-                    // if inflight.is_empty() {
-                    //     debug!(message = "no more inflight requests, will reconnect");
-                    //     continue 'reconnect
-                    // }
-                }
-                job = jobs.recv() => {
-                    match job {
-                        None => {
-                            io.get_mut().shutdown_write().await.map_err(Error::Shutdown)?;
-                            if inflight.is_empty() {
-                                return Ok(());
-                            }
-                        },
-                        Some(req) => {
-                            tokio::time::sleep_until(next_send_slot).await;
-                            next_send_slot = Instant::now() + TCP_SEND_PERIOD;
-                            let response_deadline = Instant::now() + *args.read_timeout;
-                            let key = inflight.insert_at(req.transaction_id, response_deadline);
-                            if let Some(prev_key) = inflight_keys.insert(req.transaction_id, key) {
-                                inflight.try_remove(&prev_key);
-                            };
-                            io.send(&req).await.map_err(Error::Send)?;
-                            io.flush().await.map_err(Error::Flush)?;
-                        }
-                    }
-                },
+                biased;
                 Some(response) = io.next() => {
+                    send_slot_sleeper.as_mut().reset(Instant::now());
+                    let _ = futures::poll!(send_slot_sleeper.as_mut());
                     match response {
                         Err(e) => return Err(Error::Receive(e)),
                         Ok(response) => {
@@ -248,6 +224,52 @@ async fn tcp_worker(
                         }
                     }
                 }
+
+                Some(expired) = inflight.next() => {
+                    let transaction_id: u16 = expired.into_inner();
+                    inflight_keys.remove(&transaction_id);
+                    debug!(message = "an inflight request timed out", transaction_id);
+                    responses.mark_timeout(transaction_id);
+                    if let Some(new_count) = sequential_timeout_countdown.checked_sub(1) {
+                        sequential_timeout_countdown = new_count;
+                    } else {
+                        continue 'reconnect
+                    };
+                }
+
+                // We need to have some down time between sending out subsequent modbus requests --
+                // otherwise the IAM device gets somewhat confused and will ignore some of the
+                // commands, leading them to time out.
+                //
+                // This conditional select will make sure that we will always wait sleeping until
+                // the next available sending slot opens up.
+                _ = &mut send_slot_sleeper, if !send_slot_available => {}
+
+                job = jobs.recv(), if send_slot_available => {
+                    match job {
+                        None => {
+                            io.get_mut().shutdown_write().await.map_err(Error::Shutdown)?;
+                            if inflight.is_empty() {
+                                return Ok(());
+                            }
+                        },
+                        Some(req) => {
+                            let response_time = Duration::from_secs(
+                                req.expected_response_length().into()
+                            ) / (args.baudrate / 10);
+                            trace!(anticipated_response_duration = ?response_time);
+                            let response_ready_time = Instant::now() + response_time;
+                            send_slot_sleeper.as_mut().reset(response_ready_time + *args.tcp_send_delay);
+                            let response_deadline = response_ready_time + *args.read_timeout;
+                            let key = inflight.insert_at(req.transaction_id, response_deadline);
+                            if let Some(prev_key) = inflight_keys.insert(req.transaction_id, key) {
+                                inflight.try_remove(&prev_key);
+                            };
+                            io.send(&req).await.map_err(Error::Send)?;
+                            io.flush().await.map_err(Error::Flush)?;
+                        }
+                    }
+                },
             }
         }
     }

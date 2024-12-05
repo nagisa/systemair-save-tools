@@ -137,12 +137,11 @@ pub mod read {
     use crate::connection::{self, Connection};
     use crate::modbus::{Operation, Request, ResponseKind};
     use crate::output;
-    use crate::registers::{DataType, RegisterIndex, ADDRESSES, DATA_TYPES, NAMES};
+    use crate::registers::{DataType, RegisterIndex};
     use futures::{StreamExt as _, TryStreamExt};
     use std::collections::VecDeque;
     use std::fmt::Write as _;
     use std::num::ParseIntError;
-    use tracing::warn;
 
     #[derive(clap::ValueEnum, Clone)]
     pub enum Format {
