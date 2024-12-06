@@ -290,11 +290,11 @@ pub mod read {
                             let Some(result) = outcome else {
                                 continue;
                             };
-                            if let ResponseKind::ErrorCode(6) = result.kind {
-                                // Server was busy to handle this request, retry these too.
+                            if result.is_server_busy() {
+                                // IAM was busy with other requests. Give it some time…
                                 // TODO: maybe add a flag to control this?
-                                // TODO: configurable retries?
-                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                                // TODO: configurable retries, sleep time?
+                                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                                 continue;
                             }
                             return Ok::<_, Error>((read_request, result));

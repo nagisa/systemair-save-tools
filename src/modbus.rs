@@ -37,6 +37,19 @@ pub struct Response {
     pub kind: ResponseKind,
 }
 
+impl Response {
+    pub fn exception_code(&self) -> Option<u8> {
+        match &self.kind {
+            ResponseKind::ErrorCode(c) => Some(*c),
+            ResponseKind::GetHoldings { values: _ } => None,
+        }
+    }
+
+    pub fn is_server_busy(&self) -> bool {
+        self.exception_code() == Some(6)
+    }
+}
+
 #[derive(Debug)]
 pub enum ResponseKind {
     ErrorCode(u8),
