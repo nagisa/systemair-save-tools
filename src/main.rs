@@ -30,7 +30,7 @@ fn main() {
         .parse::<tracing_subscriber::filter::targets::Targets>()
         .expect("foo");
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(filter)
         .init();
     match Commands::parse() {

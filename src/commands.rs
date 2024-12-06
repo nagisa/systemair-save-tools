@@ -293,13 +293,15 @@ pub mod read {
                             if let ResponseKind::ErrorCode(6) = result.kind {
                                 // Server was busy to handle this request, retry these too.
                                 // TODO: maybe add a flag to control this?
+                                // TODO: configurable retries?
+                                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 continue;
                             }
                             return Ok::<_, Error>((read_request, result));
                         }
                     })
                 })
-                .try_buffered(5);
+                .try_buffered(2);
             while let Some(response) = stream.next().await {
                 let (read_request, response) = &response?;
                 let responses = match read_request {

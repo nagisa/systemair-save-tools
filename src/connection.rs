@@ -196,14 +196,14 @@ async fn tcp_worker(
         trace!(message = "setting nodelay", is_error = ?nodelay_result.err());
         let mut io = Framed::new(socket, ModbusTCPCodec {});
         let mut sequential_timeout_countdown = args.reconnect_after_timeouts;
-        let mut send_slot_sleeper = pin::pin!(tokio::time::sleep_until(Instant::now()));
+        let mut send_slot = pin::pin!(tokio::time::sleep_until(Instant::now()));
+        // The IAM sends responses in-order only.
+        let mut last_sent_transaction_id = 0;
         loop {
-            let send_slot_available = send_slot_sleeper.is_elapsed();
+            let send_slot_available = send_slot.is_elapsed();
             tokio::select! {
                 biased;
                 Some(response) = io.next() => {
-                    send_slot_sleeper.as_mut().reset(Instant::now());
-                    let _ = futures::poll!(send_slot_sleeper.as_mut());
                     match response {
                         Err(e) => return Err(Error::Receive(e)),
                         Ok(response) => {
@@ -215,6 +215,11 @@ async fn tcp_worker(
                                 continue;
                             };
                             inflight.try_remove(&key);
+                            if inflight.is_empty()
+                                || response.transaction_id == last_sent_transaction_id {
+                                send_slot.as_mut().reset(Instant::now());
+                            }
+
                             trace!(
                                 message = "decoded a response",
                                 transaction=response.transaction_id
@@ -243,7 +248,7 @@ async fn tcp_worker(
                 //
                 // This conditional select will make sure that we will always wait sleeping until
                 // the next available sending slot opens up.
-                _ = &mut send_slot_sleeper, if !send_slot_available => {}
+                _ = &mut send_slot, if !send_slot_available => {}
 
                 job = jobs.recv(), if send_slot_available => {
                     match job {
@@ -257,9 +262,10 @@ async fn tcp_worker(
                             let response_time = Duration::from_secs(
                                 req.expected_response_length().into()
                             ) / (args.baudrate / 10);
-                            trace!(anticipated_response_duration = ?response_time);
+                            trace!(anticipated_response_time = ?response_time);
                             let response_ready_time = Instant::now() + response_time;
-                            send_slot_sleeper.as_mut().reset(response_ready_time + *args.tcp_send_delay);
+                            send_slot.as_mut().reset(response_ready_time + *args.tcp_send_delay);
+                            last_sent_transaction_id = req.transaction_id;
                             let response_deadline = response_ready_time + *args.read_timeout;
                             let key = inflight.insert_at(req.transaction_id, response_deadline);
                             if let Some(prev_key) = inflight_keys.insert(req.transaction_id, key) {
