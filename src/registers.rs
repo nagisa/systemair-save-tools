@@ -126,29 +126,35 @@ impl Mode {
 }
 
 #[derive(Clone, Copy)]
-pub struct RegisterIndex(usize);
+pub struct RegisterIndex(u16);
 
 impl RegisterIndex {
-    pub fn from_address(address: u16) -> Option<RegisterIndex> {
-        let index = ADDRESSES.partition_point(|v| *v < address);
-        (ADDRESSES[index] == address).then_some(Self(index))
+    pub const fn from_address(address: u16) -> Option<RegisterIndex> {
+        let address = address as usize;
+        if ADDRESS_INDICES.len() >= address {
+            None
+        } else if ADDRESS_INDICES[address] == 0xFFFF {
+            None
+        } else {
+            Some(RegisterIndex(ADDRESS_INDICES[address]))
+        }
     }
 
     pub fn from_name(name: &str) -> Option<RegisterIndex> {
         let index = NAMES.into_iter().position(|v| *v == name);
-        index.map(Self)
+        index.map(|v| Self(v as u16))
     }
 
     pub fn address(&self) -> u16 {
-        ADDRESSES[self.0]
+        ADDRESSES[usize::from(self.0)]
     }
 
     pub fn name(&self) -> &'static str {
-        NAMES[self.0]
+        NAMES[usize::from(self.0)]
     }
 
     pub fn data_type(&self) -> DataType {
-        DATA_TYPES[self.0]
+        DATA_TYPES[usize::from(self.0)]
     }
 }
 
@@ -929,6 +935,21 @@ macro_rules! make_lists {
 }
 
 for_each_register!(make_lists);
+
+/// Mapping from an address back to a register index.
+pub static ADDRESS_INDICES: &[u16; 30107] = &const {
+    let mut array = [0xFFFF; 30107];
+    let mut index = 0;
+    macro_rules! make_indices {
+        ($($regnum: literal: $dt: ident, $mode: ident, $name: literal $(, min = $min: literal)? $(, max = $max: literal)?;)+) => {
+            $(array[$regnum] = index; index = index + 1;)+
+        }
+    }
+    for_each_register!(make_indices);
+    let _ = index; // last `index = index + 1` unrolled by `for_each_register!` makes
+                   // the `unused_assignments` lint fire.
+    array
+};
 
 pub static DESCRIPTIONS: &[&str] = &const {
     let mut result = [""; ADDRESSES.len()];
