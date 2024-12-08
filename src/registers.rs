@@ -5,7 +5,7 @@ pub struct DataType {
 }
 
 impl DataType {
-    // Convenience aliases for nicely tabulated `for_each_regsiter` macro definition below.
+    // Convenience aliases for nicely tabulated `for_each_register` macro definition below.
     pub const U16: Self = Self {
         scale: 1,
         signed: false,
@@ -1131,7 +1131,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
             2113 => "Temperature at which the Heater circulation pump is started",
             2122 => "Off time delay for the heater circulation pump in minutes",
             2134 => "Enabling of cooling recovery",
-            2147 => "Indicates if RH trasnfer control shall beapplied",
+            2147 => "Indicates if RH transfer control shall be applied",
             2148 => {
                 "As the heat exchanger unit is rotates faster, more moisture returns indoors. If \
                  there is a demand to eject moisture outdoors, the rotor speed is limited. This \
@@ -1235,13 +1235,13 @@ pub static DESCRIPTIONS: &[&str] = &const {
             7001 => "Filter replacement time in months",
             7002 => "Timestamp of latest filter replcement, lower 16 bits",
             7003 => "Timestamp of latest filter replcement, higher 16 bits",
-            7004 => "Indicates that the LastFilterReplacementTime shall be set Now.",
+            7004 => "Indicates that the LastFilterReplacementTime shall be set to Now.",
             7005 => "Remaining filter time in seconds, lower 16 bits.",
             7006 => "Remaining filter time in seconds, higher 16 bits.",
-            7007 => "Indicates if the filter warning alarm wasgenerated.",
+            7007 => "Indicates if the filter warning alarm was generated.",
             9001 => "Unit for CAV control mode. 0=l/s, 1=m³/h, 2=cfm",
             9002 => "Units for VAV control mode. 0=Pa, 1=InH2O",
-            9003 => "Units for temperature. 0=Celcius, 1=Fahrenheit",
+            9003 => "Units for temperature. 0=Celsius, 1=Fahrenheit",
             11401 | 11402 => {
                 "Indicates what kind of DI functionality is connected to DI1. 0=None, 1=Away, \
                  2=BYP, 3=Vacuum Cleaner, 4=Cooker Hood, 5=Crowded, 6=EMT, 7=External Stop, \
