@@ -25,14 +25,18 @@ fn end<E: std::error::Error>(r: Result<(), E>) {
 }
 
 fn main() {
-    let filter_description = std::env::var("SYSTEMAIR_SAVE_TOOLS_LOG").expect("foo");
+    let filter_description = std::env::var("SYSTEMAIR_SAVE_TOOLS_LOG");
     let filter = filter_description
-        .parse::<tracing_subscriber::filter::targets::Targets>()
-        .expect("foo");
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(filter)
-        .init();
+        .as_deref()
+        .unwrap_or("info")
+        .parse::<tracing_subscriber::filter::targets::Targets>();
+    match filter {
+        Ok(f) => tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(f)
+            .init(),
+        Err(e) => end(Err(e)),
+    }
     match Commands::parse() {
         Commands::Registers(args) => end(commands::registers::run(args)),
         Commands::Read(args) => end(commands::read::run(args)),

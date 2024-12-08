@@ -178,8 +178,8 @@ struct TcpWorker {
     responses: Arc<ResponseTracker>,
     /// An in-order list of outstanding requests and their timeout instants.
     ///
-    /// This list is expected to be sorted by the sending time, but not necessarily the transaction
-    /// ID or the timeout.
+    /// This list is expected to be sorted by the order in which the requests were sent out, but
+    /// not necessarily the transaction ID or the timeout.
     ///
     /// We use this to manage timers for send slots and request timeouts. Some examples:
     ///
@@ -197,9 +197,14 @@ struct TcpWorker {
     ///    newly sent requests either get dropped or a server exception 6 will be returned (slowly
     ///    so).
     ///
-    /// It may seem like a fancy data structure like BTreeMap would be better here, but we don't
-    /// expect to have more than 2-3 concurrent in-flight requests at a time. So linear scans are
-    /// plenty good.
+    /// Specifics of how request timeouts are computed may result in a situation where the timeout
+    /// `Instant` of a request N+1 is earlier than that of a request of `N`. Regardless this logic
+    /// only keeps track of the timeout of the first request sent (in a way providing a guarantee
+    /// that timeouts will be reported back in the sending order.)
+    ///
+    /// It may seem like a fancy data structure like `BTreeMap` or `tokio_util::time::DelayQueue`
+    /// would be better here, but we don't expect to have more than 2-3 concurrent in-flight
+    /// requests at a time. So linear scans are plenty good.
     inflight: VecDeque<(u16, Instant)>,
     reconnect_countdown: usize,
 }
@@ -214,7 +219,7 @@ impl TcpWorker {
 
     async fn main_loop(mut self, mut jobs: UnboundedReceiver<Request>) -> Result<(), Error> {
         'reconnect: loop {
-            // If we are reconnecting and had any in-flight requests, it is only proper to mark
+            // If we are reconnecting and had any in-flight requests, it is only proper to report
             // them as timed out.
             for (transaction_id, _) in self.inflight.drain(..) {
                 self.responses.mark_timeout(transaction_id);
@@ -277,12 +282,13 @@ impl TcpWorker {
             .await
             .map_err(|e| Error::LookupHost(e, address.to_string()))?
             .collect::<Vec<_>>();
-        trace!(message = "resolved", ?addresses);
+        debug!(message = "resolved", ?addresses);
         let socket = TcpStream::connect(&*addresses)
             .await
             .map_err(|e| Error::Connect(e, address.to_string()))?;
         let nodelay_result = socket.set_nodelay(true);
         trace!(message = "setting nodelay", is_error = ?nodelay_result.err());
+        info!(message = "connected");
         Ok(Framed::new(socket, ModbusTCPCodec {}))
     }
 
