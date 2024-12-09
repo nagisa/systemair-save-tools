@@ -57,7 +57,7 @@ impl std::fmt::Display for DataType {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Value {
     U16(u16),
     I16(i16),
@@ -131,7 +131,7 @@ pub struct RegisterIndex(u16);
 impl RegisterIndex {
     pub const fn from_address(address: u16) -> Option<RegisterIndex> {
         let address = address as usize;
-        if ADDRESS_INDICES.len() >= address {
+        if ADDRESS_INDICES.len() <= address {
             None
         } else if ADDRESS_INDICES[address] == 0xFFFF {
             None
@@ -631,7 +631,7 @@ macro_rules! for_each_register {
             15016: U16, R_, "ALARM_FROST_PROT_ALARM", min = 0, max = 3;
             15017: U16, RW, "ALARM_FR_ST_PROT_CLEAR_ALARM", min = 0, max = 1;
             15023: U16, R_, "ALARM_DEFROSTING_ALARM", min = 0, max = 3;
-            15024: U16, RW, "ALARM_DEFR_STING_CLEAR_ALARM", min = 0, max = 1;
+            15024: U16, RW, "ALARM_DEFROSTING_CLEAR_ALARM", min = 0, max = 1;
             15030: U16, R_, "ALARM_SAF_RPM_ALARM", min = 0, max = 3;
             15031: U16, RW, "ALARM_SAF_RPM_CLEAR_ALARM", min = 0, max = 1;
             15037: U16, R_, "ALARM_EAF_RPM_ALARM", min = 0, max = 3;

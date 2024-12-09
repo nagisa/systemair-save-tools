@@ -230,7 +230,8 @@ pub mod read {
         }
     }
 
-    pub fn run(args: Args) -> Result<(), Error> {
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn run(args: Args) -> Result<(), Error> {
         let register_indices = args
             .registers
             .iter()
@@ -264,107 +265,190 @@ pub mod read {
                 Err(Error::RegisterNotFound(register.clone()))
             })
             .collect::<Result<VecDeque<_>, _>>()?;
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(Error::CreateAsyncRuntime)?;
-        rt.block_on(async move {
-            let mut output = args.output.to_output().map_err(Error::CreateOutput)?;
-            let heads = vec!["Tx ID", "Address", "Name", "Response"];
-            output.table_headers(heads).map_err(Error::WriteOutput)?;
+        let mut output = args.output.to_output().map_err(Error::CreateOutput)?;
+        let heads = vec!["Tx ID", "Address", "Name", "Response"];
+        output.table_headers(heads).map_err(Error::WriteOutput)?;
 
-            let connection = Connection::new(args.connection).await.unwrap();
-            let mut stream = futures::stream::iter(register_indices.iter().enumerate())
-                .map(|(i, read_request)| {
-                    let connection = &connection;
-                    Ok::<_, Error>(async move {
-                        loop {
-                            let outcome = connection
-                                .send(Request {
-                                    device_id: 1,
-                                    transaction_id: i as u16,
-                                    operation: read_request.to_operation(),
-                                })
-                                .await
-                                .map_err(Error::Communicate)?;
-                            let Some(result) = outcome else {
-                                continue;
-                            };
-                            if result.is_server_busy() {
-                                // IAM was busy with other requests. Give it some time…
-                                // TODO: maybe add a flag to control this?
-                                // TODO: configurable retries, sleep time?
-                                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                                continue;
-                            }
-                            return Ok::<_, Error>((read_request, result));
+        let connection = Connection::new(args.connection).await.unwrap();
+        let mut stream = futures::stream::iter(register_indices.iter())
+            .map(|read_request| {
+                let connection = &connection;
+                Ok::<_, Error>(async move {
+                    let transaction_id = connection.new_transaction_id();
+                    loop {
+                        let outcome = connection
+                            .send(Request {
+                                device_id: 1,
+                                transaction_id,
+                                operation: read_request.to_operation(),
+                            })
+                            .await
+                            .map_err(Error::Communicate)?;
+                        let Some(result) = outcome else {
+                            continue;
+                        };
+                        if result.is_server_busy() {
+                            // IAM was busy with other requests. Give it some time…
+                            // TODO: maybe add a flag to control this?
+                            // TODO: configurable retries, sleep time?
+                            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                            continue;
                         }
-                    })
+                        return Ok::<_, Error>((read_request, result));
+                    }
                 })
-                .try_buffered(2);
-            while let Some(response) = stream.next().await {
-                let (read_request, response) = &response?;
-                let responses = match read_request {
-                    ReadRequest::SingleRegister { address, index } => vec![(*address, *index, 0)],
-                    ReadRequest::RegisterRange {
-                        address_start,
-                        address_end,
-                    } => (*address_start..*address_end)
-                        .zip((0..).step_by(2))
-                        .map(|(address, value_offset)| {
-                            (address, RegisterIndex::from_address(address), value_offset)
-                        })
-                        .collect(),
-                };
-                for (address, register_index, value_offset) in responses {
-                    output
-                        .result(
-                            || {
-                                let (dt, name) = register_index
-                                    .map(|r| (r.data_type(), r.name()))
-                                    .unwrap_or((DataType::U16, "???"));
-                                let value = match &response.kind {
-                                    ResponseKind::ErrorCode(c) => format!("server exception {c}"),
-                                    ResponseKind::GetHoldings { values } => {
-                                        let mut buf = String::new();
-                                        let range = value_offset..(value_offset + dt.bytes());
-                                        for value in dt.from_bytes(&values[range]) {
-                                            buf.write_fmt(format_args!("{} ", value)).unwrap();
-                                        }
-                                        buf
+            })
+            .try_buffered(2);
+        while let Some(response) = stream.next().await {
+            let (read_request, response) = &response?;
+            let responses = match read_request {
+                ReadRequest::SingleRegister { address, index } => vec![(*address, *index, 0)],
+                ReadRequest::RegisterRange {
+                    address_start,
+                    address_end,
+                } => (*address_start..*address_end)
+                    .zip((0..).step_by(2))
+                    .map(|(address, value_offset)| {
+                        (address, RegisterIndex::from_address(address), value_offset)
+                    })
+                    .collect(),
+            };
+            for (address, register_index, value_offset) in responses {
+                output
+                    .result(
+                        || {
+                            let (dt, name) = register_index
+                                .map(|r| (r.data_type(), r.name()))
+                                .unwrap_or((DataType::U16, "???"));
+                            let value = match &response.kind {
+                                ResponseKind::ErrorCode(c) => format!("server exception {c}"),
+                                ResponseKind::GetHoldings { values } => {
+                                    let mut buf = String::new();
+                                    let range = value_offset..(value_offset + dt.bytes());
+                                    for value in dt.from_bytes(&values[range]) {
+                                        buf.write_fmt(format_args!("{} ", value)).unwrap();
                                     }
-                                };
-                                vec![
-                                    response.transaction_id.to_string(),
-                                    address.to_string(),
-                                    name.to_string(),
-                                    value,
-                                ]
-                            },
-                            || {
-                                let name = register_index.map(|r| r.name());
-                                let dt = register_index
-                                    .map(|r| r.data_type())
-                                    .unwrap_or(DataType::U16);
-                                let (values, exception) = match &response.kind {
-                                    ResponseKind::ErrorCode(e) => (None, Some(*e)),
-                                    ResponseKind::GetHoldings { values } => {
-                                        let range = value_offset..(value_offset + dt.bytes());
-                                        (Some(dt.from_bytes(&values[range]).collect()), None)
-                                    }
-                                };
-                                OutputSchema {
-                                    address,
-                                    name,
-                                    values,
-                                    exception,
+                                    buf
                                 }
-                            },
-                        )
-                        .map_err(Error::WriteOutput)?;
-                }
+                            };
+                            vec![
+                                response.transaction_id.to_string(),
+                                address.to_string(),
+                                name.to_string(),
+                                value,
+                            ]
+                        },
+                        || {
+                            let name = register_index.map(|r| r.name());
+                            let dt = register_index
+                                .map(|r| r.data_type())
+                                .unwrap_or(DataType::U16);
+                            let (values, exception) = match &response.kind {
+                                ResponseKind::ErrorCode(e) => (None, Some(*e)),
+                                ResponseKind::GetHoldings { values } => {
+                                    let range = value_offset..(value_offset + dt.bytes());
+                                    (Some(dt.from_bytes(&values[range]).collect()), None)
+                                }
+                            };
+                            OutputSchema {
+                                address,
+                                name,
+                                values,
+                                exception,
+                            }
+                        },
+                    )
+                    .map_err(Error::WriteOutput)?;
             }
-            output.commit().map_err(Error::CommitOutput)
-        })
+        }
+        output.commit().map_err(Error::CommitOutput)
+    }
+}
+
+pub mod mqtt {
+    use std::sync::Arc;
+
+    use homie5::device_description::NodeDescriptionBuilder;
+    use rumqttc::v5::mqttbytes::{v5::LastWill, QoS};
+    use rumqttc::v5::{AsyncClient, MqttOptions};
+    use tracing::info;
+
+    use crate::connection::Connection;
+    use crate::{connection, homie};
+
+    /// Read the value stored in the specified register.
+    #[derive(clap::Parser)]
+    pub struct Args {
+        #[clap(flatten)]
+        connection: connection::Args,
+
+        /// How to connect to the MQTT broker.
+        ///
+        /// The value is expected to be provided as an URL, such as:
+        /// `mqtt://location:1883?client_id=hostname` for plain text connection or
+        /// `mqtts://location:1883?client_id=hostname` for TLS protected connection.
+        #[clap(short = 'm', long)]
+        mqtt_broker: String,
+
+        /// To be provided together with `--mqtt-password` to use password based authentication
+        /// with the broker.
+        #[clap(short = 'u', long, requires = "mqtt_password")]
+        mqtt_user: Option<String>,
+
+        /// To be provided together with `--mqtt-user` to use password based authentication with
+        /// the broker.
+        #[clap(short = 'p', long, requires = "mqtt_user")]
+        mqtt_password: Option<String>,
+
+        #[clap(long, default_value = "homie/systemair")]
+        mqtt_topic_base: String,
+
+        #[clap(long, default_value = "homie/systemair")]
+        device_name: String,
+    }
+
+    impl Args {
+        fn topic(&self, suffix: &str) -> String {
+            format!("{}/{}", self.mqtt_topic_base, suffix)
+        }
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum Error {}
+
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn run(args: Args) -> Result<(), Error> {
+        let mut mqtt_options = MqttOptions::parse_url(&args.mqtt_broker).expect("TODO");
+        if let Some((u, p)) = args
+            .mqtt_user
+            .as_ref()
+            .and_then(|u| Some((u, args.mqtt_password.as_ref()?)))
+        {
+            mqtt_options.set_credentials(u, p);
+        }
+
+        let connection = Arc::new(Connection::new(args.connection).await.unwrap());
+
+        let (protocol, last_will) = homie5::Homie5DeviceProtocol::new(
+            "systemair-save".try_into().expect("TODO"),
+            homie5::HomieDomain::Default,
+        );
+        mqtt_options.set_last_will(LastWill::new(
+            last_will.topic,
+            last_will.message,
+            homie::convert_qos(last_will.qos),
+            last_will.retain,
+            None,
+        ));
+        let (client, mut client_loop) = AsyncClient::new(mqtt_options, 100);
+        let mut device = homie::SystemAirDevice::new(client, protocol, connection);
+        device.publish_device().await.expect("TODO");
+        loop {
+            use rumqttc::v5::mqttbytes::v5::{ConnAck, Packet};
+            use rumqttc::v5::Event;
+            let result = client_loop.poll().await.expect("TODO");
+            dbg!(result);
+        }
+        Ok(())
     }
 }

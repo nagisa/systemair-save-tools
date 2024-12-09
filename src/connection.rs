@@ -3,6 +3,7 @@ use futures::{SinkExt, StreamExt as _};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::pin;
+use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
@@ -12,7 +13,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -122,6 +123,7 @@ pub struct Connection {
     pub request_queue: tokio::sync::mpsc::UnboundedSender<Request>,
     pub worker: tokio::task::JoinHandle<Result<(), Error>>,
     pub response_tracker: Arc<ResponseTracker>,
+    transaction_id_generator: std::sync::atomic::AtomicU16,
 }
 
 impl Connection {
@@ -145,6 +147,7 @@ impl Connection {
             request_queue,
             worker,
             response_tracker,
+            transaction_id_generator: AtomicU16::new(0),
         })
     }
 
@@ -163,6 +166,11 @@ impl Connection {
     //         worker: tokio::task::spawn(worker(jobs)),
     //     })
     // }
+
+    pub fn new_transaction_id(&self) -> u16 {
+        self.transaction_id_generator
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
 
     pub async fn send(&self, request: Request) -> Result<Option<Response>, Error> {
         let transaction_id = request.transaction_id;
@@ -261,12 +269,19 @@ impl TcpWorker {
                                 }
                             },
                             Some(req) => {
-                                self.send(
+                                let result = self.send(
                                     req,
                                     &mut io,
                                     send_time.as_mut(),
                                     request_timeout.as_mut()
-                                ).await?;
+                                ).await;
+                                if let Err(e) = result {
+                                    warn!(
+                                        message="sending request failed, will reconnect",
+                                        error=(&e as &dyn std::error::Error)
+                                    );
+                                    continue 'reconnect;
+                                }
                             }
                         }
                     },
@@ -289,6 +304,7 @@ impl TcpWorker {
         let nodelay_result = socket.set_nodelay(true);
         trace!(message = "setting nodelay", is_error = ?nodelay_result.err());
         info!(message = "connected");
+        self.reconnect_countdown = self.args.reconnect_after_timeouts;
         Ok(Framed::new(socket, ModbusTCPCodec {}))
     }
 
