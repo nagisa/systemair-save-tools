@@ -442,12 +442,26 @@ pub mod mqtt {
         ));
         let (client, mut client_loop) = AsyncClient::new(mqtt_options, 100);
         let mut device = homie::SystemAirDevice::new(client, protocol, connection);
-        device.publish_device().await.expect("TODO");
+
+        {
+            let mut publish_future = std::pin::pin!(device.publish_device());
+            loop {
+                tokio::select! {
+                    biased;
+                    result = client_loop.poll() => {
+                        result.expect("TODO");
+                    }
+                    result = &mut publish_future => {
+                        break result.expect("TODO");
+                    }
+                }
+            }
+        }
         loop {
             tokio::select! {
                 biased;
                 result = client_loop.poll() => {
-                    // dbg!(result.expect("TODO"));
+                    result.expect("TODO");
                 }
                 () = device.step() => {
                 }

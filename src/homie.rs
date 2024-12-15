@@ -8,6 +8,8 @@ use futures::{Stream, StreamExt as _};
 use homie5::client::{Publish, QoS, Subscription};
 use homie5::device_description::HomieDeviceDescription;
 use homie5::{Homie5DeviceProtocol, HomieDeviceStatus, HomieID, HomieValue};
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -19,6 +21,7 @@ pub struct SystemAirDevice {
     state: HomieDeviceStatus,
     description: HomieDeviceDescription,
     read_stream: SelectAll<Pin<Box<dyn Stream<Item = PropertyEvent>>>>,
+    last_values: BTreeMap<(HomieID, HomieID), Option<Box<dyn PropertyValue>>>,
 }
 
 impl SystemAirDevice {
@@ -32,11 +35,18 @@ impl SystemAirDevice {
         let description = homie5::device_description::DeviceDescriptionBuilder::new()
             .name("SystemAIR SAVE")
             .add_node(alarm_node_id.clone(), alarm_node::description())
-            .add_node(demand_control_node_id.clone(), demand_control_node::description())
+            // .add_node(
+            //     demand_control_node_id.clone(),
+            //     demand_control_node::description(),
+            // )
             .build();
         let mut read_stream = SelectAll::new();
         for stream in alarm_node::stream(alarm_node_id, Arc::clone(&modbus)) {
             read_stream.push(stream);
+        }
+        let mut last_values = BTreeMap::new();
+        for (n, _, p, _) in description.iter() {
+            last_values.insert((n.clone(), p.clone()), None);
         }
         Self {
             mqtt,
@@ -44,6 +54,7 @@ impl SystemAirDevice {
             protocol,
             description,
             read_stream,
+            last_values,
         }
     }
 
@@ -62,7 +73,11 @@ impl SystemAirDevice {
                         .expect("TODO");
                     self.mqtt.homie_publish(p).await?;
                 }
-                homie5::DevicePublishStep::PropertyValues => {}
+                homie5::DevicePublishStep::PropertyValues => {
+                    while self.last_values.values().any(|v| v.is_none()) {
+                        self.step().await;
+                    }
+                }
                 homie5::DevicePublishStep::SubscribeProperties => {
                     let p = self
                         .protocol
@@ -87,19 +102,46 @@ impl SystemAirDevice {
                 property_name: prop_id,
                 kind,
             }) => match kind {
-                PropertyEventKind::ValueChanged(value) => {
+                PropertyEventKind::PropertyValue(value) => {
+                    let entry = match self.last_values.entry((node_id, prop_id)) {
+                        Entry::Vacant(ve) => {
+                            let key = ve.key();
+                            panic!("{}/{} was published but not in description", key.0, key.1);
+                        }
+                        Entry::Occupied(mut oe) => {
+                            match oe.get_mut() {
+                                Some(o) => {
+                                    // TODO: consider tracking value and target changes separately?
+                                    if o.value() == value.value() && o.target() == value.target() {
+                                        return; // No change, skip publishing.
+                                    } else {
+                                        *o = value;
+                                    }
+                                }
+                                v @ None => {
+                                    v.replace(value);
+                                }
+                            }
+                            oe
+                        }
+                    };
+                    let key = entry.key();
+                    let value = entry
+                        .get()
+                        .as_ref()
+                        .expect("the statement above will have put `Some` in this entry");
                     let (value_op, target_op) = self
                         .description
-                        .with_property_by_id(&node_id, &prop_id, |pd| {
+                        .with_property_by_id(&key.0, &key.1, |pd| {
                             let val = self.protocol.publish_value(
-                                &node_id,
-                                &prop_id,
+                                &key.0,
+                                &key.1,
                                 value.value(),
                                 pd.retained,
                             );
                             let tgt = self.protocol.publish_target(
-                                &node_id,
-                                &prop_id,
+                                &key.0,
+                                &key.1,
                                 value.target(),
                                 pd.retained,
                             );
@@ -109,7 +151,6 @@ impl SystemAirDevice {
                     self.mqtt.homie_publish(target_op).await.expect("TODO");
                     self.mqtt.homie_publish(value_op).await.expect("TODO");
                 }
-                PropertyEventKind::ValueRead(_) => {}
                 PropertyEventKind::ReadError(arc) => {
                     // TODO: raise homie device alarm?
                 }
@@ -198,9 +239,7 @@ trait PropertyValue {
 
 enum PropertyEventKind {
     /// Value changed.
-    ValueChanged(Box<dyn PropertyValue>),
-    /// Value was read out, but did not change since the last time.
-    ValueRead(Box<dyn PropertyValue>),
+    PropertyValue(Box<dyn PropertyValue>),
     /// There was an error reading the value behind this property.
     ReadError(Arc<ReadStreamError>),
     /// There was a server exception indicated in the response.

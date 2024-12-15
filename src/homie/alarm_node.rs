@@ -15,14 +15,6 @@ use tracing::info;
 
 use super::{PropertyEvent, PropertyEventKind, PropertyValue, ReadStreamError};
 
-macro_rules! registers {
-    ($(($i: literal, $n: literal),)*) => {
-        const {
-            [$(((RegisterIndex::from_address($i).unwrap(), HomieID::new_const($n))),)*]
-        }
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 enum AlarmValue {
@@ -60,6 +52,14 @@ impl PropertyValue for AlarmValue {
             AlarmValue::Firing | AlarmValue::Evaluating => "firing",
         }
         .to_string()
+    }
+}
+
+macro_rules! registers {
+    ($(($i: literal, $n: literal),)*) => {
+        const {
+            [$(((RegisterIndex::from_address($i).unwrap(), HomieID::new_const($n))),)*]
+        }
     }
 }
 
@@ -151,56 +151,44 @@ fn stream_one<const N: usize>(
     registers: &'static [(RegisterIndex, HomieID); N],
     polling_period: Duration,
 ) -> impl Stream<Item = PropertyEvent> {
-    let r = super::modbus_read_stream(modbus, get_holdings_for(registers), polling_period)
-        .scan(
-            [const { None::<AlarmValue> }; N],
-            move |known_values, vs| {
-                let start_address = registers[0].0.address();
-                let vs = vs.map_err(Arc::new);
-                let node_id = node_id.clone();
-                let mut results = [const { None::<PropertyEvent> }; N];
-                for (value_slot, (register_index, property_id)) in registers.iter().enumerate() {
-                    let kind = match &vs {
-                        Err(e) => PropertyEventKind::ReadError(Arc::clone(e)),
-                        Ok(Response {
-                            kind: ResponseKind::ErrorCode(e),
-                            ..
-                        }) => PropertyEventKind::ServerException(*e),
-                        Ok(Response {
-                            kind: ResponseKind::GetHoldings { values },
-                            ..
-                        }) => {
-                            let offset = usize::from(register_index.address() - start_address);
-                            let data_type = register_index.data_type();
-                            let Some(Value::U16(value)) = data_type
-                                .from_bytes(&values[offset..][..data_type.bytes()])
-                                .next()
-                            else {
-                                panic!("decoding alarm value should always succeed")
-                            };
-                            let Ok(value) = AlarmValue::try_from(value) else {
-                                todo!("invalid contents from modbus for alarms, report error")
-                            };
-                            let old_value =
-                                std::mem::replace(&mut known_values[value_slot], Some(value));
-                            if Some(value) == old_value {
-                                PropertyEventKind::ValueRead(Box::new(value))
-                            } else {
-                                PropertyEventKind::ValueChanged(Box::new(value))
-                            }
-                        }
-                    };
-                    results[value_slot] = Some(PropertyEvent {
-                        node_id: node_id.clone(),
-                        property_name: property_id.clone(),
-                        kind,
-                    });
+    super::modbus_read_stream(modbus, get_holdings_for(registers), polling_period).flat_map(
+        move |vs| {
+            let start_address = registers[0].0.address();
+            let vs = vs.map_err(Arc::new);
+            let node_id = node_id.clone();
+            futures::stream::iter(registers.iter().map(move |(register_index, prop_id)| {
+                let kind = match &vs {
+                    Err(e) => PropertyEventKind::ReadError(Arc::clone(e)),
+                    Ok(Response {
+                        kind: ResponseKind::ErrorCode(e),
+                        ..
+                    }) => PropertyEventKind::ServerException(*e),
+                    Ok(Response {
+                        kind: ResponseKind::GetHoldings { values },
+                        ..
+                    }) => {
+                        let offset = usize::from(register_index.address() - start_address);
+                        let data_type = register_index.data_type();
+                        let Some(Value::U16(value)) = data_type
+                            .from_bytes(&values[offset..][..data_type.bytes()])
+                            .next()
+                        else {
+                            panic!("decoding alarm value should always succeed")
+                        };
+                        let Ok(value) = AlarmValue::try_from(value) else {
+                            todo!("invalid contents from modbus for alarms, report error")
+                        };
+                        PropertyEventKind::PropertyValue(Box::new(value))
+                    }
+                };
+                PropertyEvent {
+                    node_id: node_id.clone(),
+                    property_name: prop_id.clone(),
+                    kind,
                 }
-                futures::future::ready(Some(results))
-            },
-        )
-        .flat_map(|v| futures::stream::iter(v.into_iter().map(|v| v.unwrap())));
-    r
+            }))
+        },
+    )
 }
 
 // TODO: when summary registers change, read the alarm states immediately.
