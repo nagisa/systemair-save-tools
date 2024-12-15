@@ -444,10 +444,14 @@ pub mod mqtt {
         let mut device = homie::SystemAirDevice::new(client, protocol, connection);
         device.publish_device().await.expect("TODO");
         loop {
-            use rumqttc::v5::mqttbytes::v5::{ConnAck, Packet};
-            use rumqttc::v5::Event;
-            let result = client_loop.poll().await.expect("TODO");
-            dbg!(result);
+            tokio::select! {
+                biased;
+                result = client_loop.poll() => {
+                    // dbg!(result.expect("TODO"));
+                }
+                () = device.step() => {
+                }
+            }
         }
         Ok(())
     }

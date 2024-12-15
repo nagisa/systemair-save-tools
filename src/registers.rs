@@ -78,6 +78,12 @@ impl Value {
     }
 }
 
+impl Into<String> for Value {
+    fn into(self) -> String {
+        self.to_string()
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
@@ -123,6 +129,10 @@ impl Mode {
     pub const W: Self = Self(1 << 1);
     pub const RW: Self = Self(Self::R.0 | Self::W.0);
     const R_: Self = Self::R;
+
+    pub fn is_writable(&self) -> bool {
+        (self.0 & Self::W.0) != 0
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -155,6 +165,10 @@ impl RegisterIndex {
 
     pub fn data_type(&self) -> DataType {
         DATA_TYPES[usize::from(self.0)]
+    }
+
+    pub fn mode(&self) -> Mode {
+        MODES[usize::from(self.0)]
     }
 }
 
@@ -983,7 +997,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
             1039 => "Actual seasson for Demand Control. 0=Summer, 1=Winter",
             1041 => "Pband setting for CO2 demand control",
             1043 => "Set point setting for CO2 demand control",
-            1044 => "Flag indicating if CO2 demand control isallowed",
+            1044 => "Flag indicating if CO2 demand control is allowed",
             1101 => "Time delay setting for user mode Holiday",
             1102 => "Time delay setting for user mode Away",
             1103 => "Time delay setting for user mode Fire Place",
