@@ -63,11 +63,13 @@ impl PropertyValue for AlarmValue {
     }
 
     fn target(&self) -> Option<String> {
-        Some(match self {
-            AlarmValue::Clear | AlarmValue::Acknowledged => "clear",
-            AlarmValue::Firing | AlarmValue::Evaluating => "firing",
-        }
-        .to_string())
+        Some(
+            match self {
+                AlarmValue::Clear | AlarmValue::Acknowledged => "clear",
+                AlarmValue::Firing | AlarmValue::Evaluating => "firing",
+            }
+            .to_string(),
+        )
     }
 }
 
@@ -162,38 +164,24 @@ fn get_holdings_for(registers: &[(RegisterIndex, HomieID)]) -> Operation {
 }
 
 fn stream_one<const N: usize>(
-    node_id: HomieID,
-    modbus: Arc<Connection>,
+    node_id: &HomieID,
+    modbus: &Arc<Connection>,
     registers: &'static [(RegisterIndex, HomieID); N],
     polling_period: Duration,
 ) -> impl Stream<Item = PropertyEvent> {
-    super::modbus_read_stream(modbus, get_holdings_for(registers), polling_period).flat_map(
-        move |vs| {
-            let start_address = registers[0].0.address();
-            let vs = vs.map_err(Arc::new);
-            let node_id = node_id.clone();
-            futures::stream::iter(registers.iter().map(move |(register_index, prop_id)| {
-                let kind = PropertyEventKind::from_holdings_response(&vs, |vs| {
-                    let offset = 2 * usize::from(register_index.address() - start_address);
-                    let data_type = register_index.data_type();
-                    let Some(Value::U16(value)) = data_type
-                        .from_bytes(&vs[offset..][..data_type.bytes()])
-                        .next()
-                    else {
-                        panic!("decoding alarm value should always succeed")
-                    };
-                    let Ok(value) = AlarmValue::try_from(value) else {
-                        todo!("invalid contents from modbus for alarms, report error")
-                    };
-                    value
-                });
-                PropertyEvent {
-                    node_id: node_id.clone(),
-                    property_name: prop_id.clone(),
-                    kind,
-                }
-            }))
-        },
+    super::modbus_read_stream_flatmap_registers(
+        modbus,
+        get_holdings_for(registers),
+        polling_period,
+        node_id,
+        registers.iter().map(|(r, p)| {
+            (*r, p.clone(), |v: Value| {
+                let Ok(value) = AlarmValue::try_from(v.into_inner()) else {
+                    todo!("invalid contents from modbus for alarms, report error")
+                };
+                Box::new(value) as _
+            })
+        }),
     )
 }
 
@@ -203,20 +191,20 @@ pub fn stream(
     modbus: Arc<Connection>,
 ) -> [std::pin::Pin<Box<dyn Stream<Item = PropertyEvent>>>; 3] {
     let summary_stream = stream_one(
-        node_id.clone(),
-        Arc::clone(&modbus),
+        &node_id,
+        &modbus,
         &ALARM_TYPE_SUMMARY_REGISTERS,
         Duration::from_millis(1000),
     );
     let state1_stream = stream_one(
-        node_id.clone(),
-        Arc::clone(&modbus),
+        &node_id,
+        &modbus,
         &ALARM_STATE_REGISTERS_1,
         Duration::from_millis(30000),
     );
     let state2_stream = stream_one(
-        node_id,
-        Arc::clone(&modbus),
+        &node_id,
+        &modbus,
         &ALARM_STATE_REGISTERS_2,
         Duration::from_millis(30000),
     );
