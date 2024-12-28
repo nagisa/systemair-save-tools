@@ -7,9 +7,9 @@ use futures::Stream;
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
-use homie5::{Homie5Message, HomieDataType, HomieID};
+use homie5::{HomieDataType, HomieID};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use strum::{VariantArray, VariantNames};
+use strum::VariantNames;
 
 macro_rules! registers {
     ($(($i: literal, $n: literal),)*) => {
