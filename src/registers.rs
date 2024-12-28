@@ -195,15 +195,15 @@ macro_rules! for_each_register {
             1102: U16, RW, "USERMODE_AWAY_TIME", min = 1, max = 72;
             1103: U16, RW, "USERMODE_FIREPLACE_TIME", min = 1, max = 60;
             1104: U16, RW, "USERMODE_REFRESH_TIME", min = 1, max = 240;
-            1105: U16, RW, "USERMODE_CR_WDED_TIME", min = 1, max = 8;
+            1105: U16, RW, "USERMODE_CROWDED_TIME", min = 1, max = 8;
             1111: U16, R_, "USERMODE_REMAINING_TIME_L";
             1112: U16, R_, "USERMODE_REMAINING_TIME_H";
             1121: U16, RW, "IAQ_SPEED_LEVEL_MIN", min = 2, max = 3;
             1122: U16, RW, "IAQ_SPEED_LEVEL_MAX", min = 3, max = 5;
             1123: U16, R_, "IAQ_LEVEL", min = 0, max = 2;
             1131: U16, RW, "USERMODE_MANUAL_AIRFLOW_LEVEL_SAF", min = 0, max = 4;
-            1135: U16, RW, "USERMODE_CR_WDED_AIRFLOW_LEVEL_SAF", min = 3, max = 5;
-            1136: U16, RW, "USERMODE_CR_WDED_AIRFLOW_LEVEL_EAF", min = 3, max = 5;
+            1135: U16, RW, "USERMODE_CROWDED_AIRFLOW_LEVEL_SAF", min = 3, max = 5;
+            1136: U16, RW, "USERMODE_CROWDED_AIRFLOW_LEVEL_EAF", min = 3, max = 5;
             1137: U16, RW, "USERMODE_REFRESH_AIRFLOW_LEVEL_SAF", min = 3, max = 5;
             1138: U16, RW, "USERMODE_REFRESH_AIRFLOW_LEVEL_EAF", min = 3, max = 5;
             1139: U16, RW, "USERMODE_FIREPLACE_AIRFLOW_LEVEL_SAF", min = 3, max = 5;
@@ -216,7 +216,7 @@ macro_rules! for_each_register {
             1146: U16, RW, "USERMODE_COOKERHOOD_AIRFLOW_LEVEL_EAF", min = 1, max = 5;
             1147: U16, RW, "USERMODE_VACUUMCLEANER_AIRFLOW_LEVEL_SAF", min = 1, max = 5;
             1148: U16, RW, "USERMODE_VACUUMCLEANER_AIRFLOW_LEVEL_EAF", min = 1, max = 5;
-            1151: CEL, RW, "USERMODE_CR_WDED_T_OFFSET", min = -100, max = 0;
+            1151: CEL, RW, "USERMODE_CROWDED_T_OFFSET", min = -100, max = 0;
             1161: U16, R_, "USERMODE_MODE", min = 0, max = 12;
             1162: U16, RW, "USERMODE_HMI_CHANGE_REQUEST", min = 0, max = 7;
             1171: U16, RW, "CDI_1_AIRFLOW_LEVEL_SAF", min = 0, max = 5;
@@ -231,7 +231,7 @@ macro_rules! for_each_register {
             1182: U16, RW, "USERMODE_AWAY_DI_OFF_DELAY", min = 0, max = 72;
             1183: U16, RW, "USERMODE_FIRPLACE_DI_OFF_DELAY", min = 0, max = 60;
             1184: U16, RW, "USERMODE_REFRESH_DI_OFF_DELAY", min = 0, max = 240;
-            1185: U16, RW, "USERMODE_CR_WDED_DI_OFF_DELAY", min = 0, max = 8;
+            1185: U16, RW, "USERMODE_CROWDED_DI_OFF_DELAY", min = 0, max = 8;
             1188: U16, RW, "CDI1_OFF_DELAY", min = 0, max = 240;
             1189: U16, RW, "CDI2_OFF_DELAY", min = 0, max = 240;
             1190: U16, RW, "CDI3_OFF_DELAY", min = 0, max = 240;
@@ -319,7 +319,7 @@ macro_rules! for_each_register {
             2013: CEL, RW, "TC_CASCADE_SP", min = 120, max = 400;
             2021: CEL, RW, "TC_CASCADE_SP_MIN", min = 120, max = 400;
             2022: CEL, RW, "TC_CASCADE_SP_MAX", min = 120, max = 400;
-            2031: U16, RW, "TC_CONTR_L_MODE", min = 0, max = 2;
+            2031: U16, RW, "TC_CONTROL_MODE", min = 0, max = 2;
             2051: CEL, R_, "TC_EAT_RAT_SP", min = 120, max = 400;
             2053: CEL, R_, "TC_ROOM_CTRL_SP_SATC", min = 120, max = 400;
             2054: CEL, R_, "TC_SP_SATC", min = 120, max = 300;
@@ -336,10 +336,10 @@ macro_rules! for_each_register {
             2147: U16, R_, "HEAT_EXCHANGER_RH_TRANSFER_CTRL_ENABLED";
             2148: U16, R_, "HEAT_EXCHANGER_SPEED_LIMIT_RH_TRANSFER", min = 0, max = 100;
             2149: U16, R_, "PWM_TRIAC_OUTPUT", min = 0, max = 100;
-            2201: U16, RW, "R_TOR_RH_TRANSFER_CTRL_PBAND", min = 0, max = 40;
-            2202: U16, RW, "R_TOR_RH_TRANSFER_CTRL_ITIME", min = 120, max = 0;
-            2203: U16, RW, "R_TOR_RH_TRANSFER_CTRL_SETPOINT", min = 100, max = 45;
-            2204: U16, RW, "R_TOR_RH_TRANSFER_CTRL_ON_OFF", min = 1, max = 1;
+            2201: U16, RW, "ROTOR_RH_TRANSFER_CTRL_PBAND", min = 0, max = 40;
+            2202: U16, RW, "ROTOR_RH_TRANSFER_CTRL_ITIME", min = 120, max = 0;
+            2203: U16, RW, "ROTOR_RH_TRANSFER_CTRL_SETPOINT", min = 100, max = 45;
+            2204: U16, RW, "ROTOR_RH_TRANSFER_CTRL_ON_OFF", min = 1, max = 1;
             2211: SPH, R_, "ROTOR_EA_SPEC_HUMIDITY", min = 0;
             2212: SPH, R_, "ROTOR_OA_SPEC_HUMIDITY", min = 0;
             2213: SPH, R_, "ROTOR_EA_SPEC_HUMIDITY_SETPOINT", min = 0;
@@ -348,14 +348,14 @@ macro_rules! for_each_register {
             2315: CEL, RW, "COOLER_RECOVERY_LIMIT_T", min = 0, max = 100;
             2316: CEL, RW, "COOLER_OAT_INTERLOCK_T", min = 120, max = 250;
             2317: U16, RW, "COOLER_CIRC_PUMP_STOP_DELAY", min = 0, max = 60;
-            2403: CEL, RW, "EXTRA_CONTR_LLER_SET_PI_SETPOINT", min = -300, max = 400;
-            2404: CEL, RW, "EXTRA_CONTR_LLER_CIRC_PUMP_START_T", min = 0, max = 200;
-            2405: U16, RW, "EXTRA_CONTR_LLER_CIRC_PUMP_STOP_DELAY", min = 0, max = 60;
-            2418: U16, RW, "EXTRA_CONTR_LLER_PREHEATER_SETPOINT_TYPE", min = 0, max = 1;
-            2420: CEL, RW, "EXTRA_CONTR_LLER_GEO_PREHEATER_SP", min = -300, max = 100;
-            2421: CEL, RW, "EXTRA_CONTR_LLER_GEO_PREHEATER_ACTIVATION_T", min = -300, max = 0;
-            2422: CEL, RW, "EXTRA_CONTR_LLER_GEO_PRECOOLER_SP", min = 100, max = 300;
-            2423: CEL, RW, "EXTRA_CONTR_LLER_GEO_PRECOOLER_ACTIVATION_T", min = 150, max = 300;
+            2403: CEL, RW, "EXTRA_CONTROLLER_SET_PI_SETPOINT", min = -300, max = 400;
+            2404: CEL, RW, "EXTRA_CONTROLLER_CIRC_PUMP_START_T", min = 0, max = 200;
+            2405: U16, RW, "EXTRA_CONTROLLER_CIRC_PUMP_STOP_DELAY", min = 0, max = 60;
+            2418: U16, RW, "EXTRA_CONTROLLER_PREHEATER_SETPOINT_TYPE", min = 0, max = 1;
+            2420: CEL, RW, "EXTRA_CONTROLLER_GEO_PREHEATER_SP", min = -300, max = 100;
+            2421: CEL, RW, "EXTRA_CONTROLLER_GEO_PREHEATER_ACTIVATION_T", min = -300, max = 0;
+            2422: CEL, RW, "EXTRA_CONTROLLER_GEO_PRECOOLER_SP", min = 100, max = 300;
+            2423: CEL, RW, "EXTRA_CONTROLLER_GEO_PRECOOLER_ACTIVATION_T", min = 150, max = 300;
             2451: CEL, RW, "CHANGE_OVER_CIRC_PUMP_START_T", min = 0, max = 200;
             2452: U16, RW, "CHANGE_OVER_CIRC_PUMP_STOP_DELAY", min = 0, max = 60;
             2504: CEL, RW, "ECO_T_Y1_OFFSET", min = 0, max = 100;
@@ -382,7 +382,7 @@ macro_rules! for_each_register {
             4102: CEL, RW, "FREE_COOLING_OUTDOOR_DAYTIME_T", min = 120, max = 300;
             4103: CEL, RW, "FREE_COOLING_OUTDOOR_NIGHTTIME_DEACTIVATION_HIGH_T_LIMIT", min = 70, max = 300;
             4104: CEL, RW, "FREE_COOLING_OUTDOOR_NIGHTTIME_DEACTIVATION_LOW_T_LIMIT", min = 70, max = 300;
-            4105: CEL, RW, "FREE_COOLING_R_OM_CANCEL_T", min = 120, max = 300;
+            4105: CEL, RW, "FREE_COOLING_ROOM_CANCEL_T", min = 120, max = 300;
             4106: U16, RW, "FREE_COOLING_START_TIME_H";
             4107: U16, RW, "FREE_COOLING_START_TIME_M", min = 0, max = 59;
             4108: U16, RW, "FREE_COOLING_END_TIME_H";
@@ -643,7 +643,7 @@ macro_rules! for_each_register {
             15009: U16, R_, "ALARM_EAF_CTRL_ALARM", min = 0, max = 3;
             15010: U16, RW, "ALARM_EAF_CTRL_CLEAR_ALARM", min = 0, max = 1;
             15016: U16, R_, "ALARM_FROST_PROT_ALARM", min = 0, max = 3;
-            15017: U16, RW, "ALARM_FR_ST_PROT_CLEAR_ALARM", min = 0, max = 1;
+            15017: U16, RW, "ALARM_FROST_PROT_CLEAR_ALARM", min = 0, max = 1;
             15023: U16, R_, "ALARM_DEFROSTING_ALARM", min = 0, max = 3;
             15024: U16, RW, "ALARM_DEFROSTING_CLEAR_ALARM", min = 0, max = 1;
             15030: U16, R_, "ALARM_SAF_RPM_ALARM", min = 0, max = 3;
@@ -677,7 +677,7 @@ macro_rules! for_each_register {
             15142: U16, R_, "ALARM_FILTER_ALARM", min = 0, max = 3;
             15143: U16, RW, "ALARM_FILTER_CLEAR_ALARM", min = 0, max = 1;
             15149: U16, R_, "ALARM_EXTRA_CONTROLLER_ALARM", min = 0, max = 3;
-            15150: U16, RW, "ALARM_EXTRA_CONTR_LLER_CLEAR_ALARM", min = 0, max = 1;
+            15150: U16, RW, "ALARM_EXTRA_CONTROLLER_CLEAR_ALARM", min = 0, max = 1;
             15156: U16, R_, "ALARM_EXTERNAL_STOP_ALARM", min = 0, max = 3;
             15157: U16, RW, "ALARM_EXTERNAL_STOP_CLEAR_ALARM", min = 0, max = 1;
             15163: U16, R_, "ALARM_RH_ALARM", min = 0, max = 3;
@@ -1036,7 +1036,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
                  4=Refresh, 5=Fireplace, 6=Away, 7=Holiday"
             }
             1171 | 1172 | 1173 | 1174 | 1175 | 1176 => {
-                "Fan speed level for configurable digital input 3. 0=Off, 1=Minimum, 2=Low, \
+                "Fan speed level for configurable digital input. 0=Off, 1=Minimum, 2=Low, \
                  3=Normal, 4=High, 5=Maximum"
             }
             1177 | 1178 => {
