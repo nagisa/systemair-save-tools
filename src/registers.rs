@@ -76,6 +76,18 @@ impl Value {
     const fn SPH(val: u16) -> Self {
         Self::SpecificHumidity(val)
     }
+
+    /// Bytes of the value.
+    ///
+    /// Should use sparingly, in case there come up values that aren't 16-bits.
+    pub(crate) fn into_inner(self) -> u16 {
+        match self {
+            Value::U16(v) => v,
+            Value::I16(v) => v as u16,
+            Value::Celsius(v) => v as u16,
+            Value::SpecificHumidity(v) => v,
+        }
+    }
 }
 
 impl Into<String> for Value {
@@ -150,25 +162,42 @@ impl RegisterIndex {
         }
     }
 
-    pub fn from_name(name: &str) -> Option<RegisterIndex> {
-        let index = NAMES.into_iter().position(|v| *v == name);
-        index.map(|v| Self(v as u16))
+    pub const fn from_name(name: &str) -> Option<RegisterIndex> {
+        const fn str_eq(a: &str, b: &str) -> bool {
+            let (ab, bb) = (a.as_bytes(), b.as_bytes());
+            let alen = ab.len();
+            if alen != bb.len() { return false; }
+            let mut i = 0;
+            while i < alen {
+                if ab[i] != bb[i] { return false; }
+                i += 1;
+            }
+            true
+        }
+        let mut i = NAMES.len() as u16;
+        while i > 0 {
+            i -= 1;
+            if str_eq(NAMES[i as usize], name) {
+                return Some(RegisterIndex(i));
+            }
+        }
+        None
     }
 
-    pub fn address(&self) -> u16 {
-        ADDRESSES[usize::from(self.0)]
+    pub const fn address(&self) -> u16 {
+        ADDRESSES[self.0 as usize]
     }
 
-    pub fn name(&self) -> &'static str {
-        NAMES[usize::from(self.0)]
+    pub const fn name(&self) -> &'static str {
+        NAMES[self.0 as usize]
     }
 
-    pub fn data_type(&self) -> DataType {
-        DATA_TYPES[usize::from(self.0)]
+    pub const fn data_type(&self) -> DataType {
+        DATA_TYPES[self.0 as usize]
     }
 
-    pub fn mode(&self) -> Mode {
-        MODES[usize::from(self.0)]
+    pub const fn mode(&self) -> Mode {
+        MODES[self.0 as usize]
     }
 }
 

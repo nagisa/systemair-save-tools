@@ -91,25 +91,6 @@ impl PropertyValue for IaqValue {
     }
 }
 
-enum BooleanValue {
-    On,
-    Off,
-}
-
-impl PropertyValue for BooleanValue {
-    fn value(&self) -> String {
-        match self {
-            Self::On => "true",
-            Self::Off => "false",
-        }
-        .to_string()
-    }
-
-    fn target(&self) -> Option<String> {
-        None
-    }
-}
-
 struct PropertyWithSetpoint {
     current: Value,
     setpoint: Value,
@@ -139,8 +120,8 @@ fn boolean_property(
             panic!("decoding boolean properties should always succeed");
         };
         match value {
-            0 => BooleanValue::Off,
-            1 => BooleanValue::On,
+            0 => super::BooleanValue::Off,
+            1 => super::BooleanValue::On,
             _ => panic!("invalid value"),
         }
     });
@@ -196,7 +177,7 @@ fn simple_property(
         let Some(value) = extract_value(START_ADDRESS, value_address, vs) else {
             panic!("decoding setpoint properties should always succeed");
         };
-        super::SimpleProperty(value)
+        super::SimpleValue(value)
     });
     PropertyEvent {
         node_id: node_id.clone(),

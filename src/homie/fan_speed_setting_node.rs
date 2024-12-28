@@ -1,16 +1,15 @@
 //! Exposes fan speed settings as a homie node.
 
-use super::{PropertyEvent, PropertyValue, ReadStreamError};
+use super::{BooleanValue, PropertyEvent, PropertyValue};
 use crate::connection::Connection;
-use crate::homie::PropertyEventKind;
-use crate::modbus::extract_value;
 use crate::registers::{RegisterIndex, Value};
-use futures::{Stream, StreamExt as _};
+use futures::Stream;
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
-use homie5::{HomieDataType, HomieID};
+use homie5::{Homie5Message, HomieDataType, HomieID};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use strum::{VariantArray, VariantNames};
 
 macro_rules! registers {
     ($(($i: literal, $n: literal),)*) => {
@@ -99,18 +98,17 @@ static LEVEL_SPEEDS: [(RegisterIndex, HomieID); 40] = registers![
     (1440, "extract-flow-for-maximum"),
 ];
 
+const MANUAL_STOP: HomieID = HomieID::new_const("allow-manual-stop");
+const REGULATION_TYPE: HomieID = HomieID::new_const("regulation-type");
+
+fn enum_format(variants: &[&str]) -> HomiePropertyFormat {
+    HomiePropertyFormat::Enum(variants.iter().copied().map(Into::into).collect())
+}
+
 pub fn description() -> HomieNodeDescription {
     let mut properties = BTreeMap::new();
-    let speed_property_format = HomiePropertyFormat::Enum(vec![
-        "off".to_string(),
-        "minimum".to_string(),
-        "low".to_string(),
-        "normal".to_string(),
-        "high".to_string(),
-        "maximum".to_string(),
-    ]);
     let speed = PropertyDescriptionBuilder::new(HomieDataType::Enum)
-        .format(speed_property_format)
+        .format(enum_format(AirflowLevel::VARIANTS))
         .settable(true)
         .build();
     for (_, name) in &LVL_REGISTERS {
@@ -119,28 +117,31 @@ pub fn description() -> HomieNodeDescription {
     for (_, name) in &LVL_REGISTERS_2 {
         properties.insert(name.clone(), speed.clone());
     }
-    let ws_property_format = HomiePropertyFormat::Enum(vec![
-        "off".to_string(),
-        "low".to_string(),
-        "normal".to_string(),
-        "high".to_string(),
-        "demand-control".to_string(),
-    ]);
-    let ws_speed = PropertyDescriptionBuilder::new(HomieDataType::Enum)
-        .format(ws_property_format)
+    let ws_level = PropertyDescriptionBuilder::new(HomieDataType::Enum)
+        .format(enum_format(WeeklyScheduleLevel::VARIANTS))
         .settable(true)
         .build();
     for (_, name) in &WS_REGISTERS {
-        properties.insert(name.clone(), ws_speed.clone());
+        properties.insert(name.clone(), ws_level.clone());
     }
 
-    let integer = PropertyDescriptionBuilder::new(HomieDataType::Integer).build();
     let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
         .settable(true)
         .build();
     for (_, name) in &LEVEL_SPEEDS {
-        properties.insert(name.clone(), integer.clone());
+        properties.insert(name.clone(), settable_integer.clone());
     }
+
+    let settable_boolean = PropertyDescriptionBuilder::new(HomieDataType::Boolean)
+        .settable(true)
+        .build();
+    properties.insert(MANUAL_STOP.clone(), settable_boolean.clone());
+
+    let fan_regulation_type = PropertyDescriptionBuilder::new(HomieDataType::Enum)
+        .format(enum_format(RegulationType::VARIANTS))
+        .settable(true)
+        .build();
+    properties.insert(REGULATION_TYPE.clone(), fan_regulation_type.clone());
 
     HomieNodeDescription {
         name: Some("fan speed settings".to_string()),
@@ -149,29 +150,27 @@ pub fn description() -> HomieNodeDescription {
     }
 }
 
-#[derive(Clone, Copy)]
-enum AirflowSpeed {
-    Off,
-    Minimum,
-    Low,
-    Normal,
-    High,
-    Maximum,
-    DemandControl,
+#[repr(u16)]
+#[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
+enum AirflowLevel {
+    Off = 0,
+    Minimum = 1,
+    Low = 2,
+    Normal = 3,
+    High = 4,
+    Maximum = 5,
 }
 
-impl PropertyValue for AirflowSpeed {
+impl AirflowLevel {
+    fn new(value: Value) -> Self {
+        Self::from_repr(value.into_inner()).expect("TODO")
+    }
+}
+
+impl PropertyValue for AirflowLevel {
     fn value(&self) -> String {
-        match self {
-            Self::Off => "off",
-            Self::Minimum => "minimum",
-            Self::Low => "low",
-            Self::Normal => "normal",
-            Self::High => "high",
-            Self::Maximum => "maximum",
-            Self::DemandControl => "demand-control",
-        }
-        .to_string()
+        <&'static str>::from(self).to_string()
     }
 
     fn target(&self) -> Option<String> {
@@ -179,110 +178,145 @@ impl PropertyValue for AirflowSpeed {
     }
 }
 
-fn speed_registers(
-    node_id: &HomieID,
-    base_address: u16,
-    registers: &'static [(RegisterIndex, HomieID)],
-    max: AirflowSpeed,
-    response: Result<crate::modbus::Response, Arc<ReadStreamError>>,
-) -> impl Iterator<Item = PropertyEvent> {
-    let node_id = node_id.clone();
-    registers.iter().map(move |(ri, prop_id)| {
-        let kind = PropertyEventKind::from_holdings_response(&response, |vs| {
-            let Some(Value::U16(value)) = extract_value(base_address, ri.address(), vs) else {
-                panic!("decoding iaq properties should always succeed");
-            };
-            match value {
-                0 => AirflowSpeed::Off,
-                1 => AirflowSpeed::Minimum,
-                2 => AirflowSpeed::Low,
-                3 => AirflowSpeed::Normal,
-                4 => AirflowSpeed::High,
-                5 => max,
-                _ => todo!(),
-            }
-        });
-        PropertyEvent {
-            node_id: node_id.clone(),
-            property_name: prop_id.clone(),
-            kind,
-        }
-    })
+#[repr(u16)]
+#[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
+enum WeeklyScheduleLevel {
+    Off = 0,
+    Minimum = 1,
+    Low = 2,
+    Normal = 3,
+    High = 4,
+    DemandControl = 5,
+}
+
+impl WeeklyScheduleLevel {
+    fn new(value: Value) -> Self {
+        Self::from_repr(value.into_inner()).expect("TODO")
+    }
+}
+
+impl PropertyValue for WeeklyScheduleLevel {
+    fn value(&self) -> String {
+        <&'static str>::from(self).to_string()
+    }
+
+    fn target(&self) -> Option<String> {
+        None
+    }
+}
+
+#[repr(u16)]
+#[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
+enum RegulationType {
+    Manual,
+    RPM,
+    ConstantPressure,
+    ConstantFlow,
+    External,
+}
+
+impl RegulationType {
+    fn new(value: Value) -> Self {
+        Self::from_repr(value.into_inner()).expect("TODO")
+    }
+}
+
+impl PropertyValue for RegulationType {
+    fn value(&self) -> String {
+        <&'static str>::from(self).to_string()
+    }
+
+    fn target(&self) -> Option<String> {
+        None
+    }
 }
 
 pub fn stream(
     node_id: HomieID,
     modbus: Arc<Connection>,
-) -> [std::pin::Pin<Box<dyn Stream<Item = PropertyEvent>>>; 4] {
-    let address: u16 = 1121;
+) -> [std::pin::Pin<Box<dyn Stream<Item = PropertyEvent>>>; 6] {
+    let address: u16 = const { LVL_REGISTERS[0].0.address() };
     let count: u16 = 1179 - address;
-    let nid = node_id.clone();
-    let max = AirflowSpeed::Maximum;
-    let stream_1 = super::modbus_read_stream(
-        Arc::clone(&modbus),
+    let stream_levels_1 = super::modbus_read_stream_flatmap_registers(
+        &modbus,
         crate::modbus::Operation::GetHoldings { address, count },
         Duration::from_secs(120),
-    )
-    .flat_map(move |vs| {
-        let vs = vs.map_err(Arc::new);
-        futures::stream::iter(speed_registers(&nid, address, &LVL_REGISTERS, max, vs))
-    });
+        &node_id,
+        LVL_REGISTERS
+            .iter()
+            .map(move |(r, p)| (*r, p.clone(), move |v| Box::new(AirflowLevel::new(v)) as _)),
+    );
 
-    let address: u16 = 4112;
+    let address: u16 = const { LVL_REGISTERS_2[0].0.address() };
     let count: u16 = 4114 - address;
-    let nid = node_id.clone();
-    let stream_2 = super::modbus_read_stream(
-        Arc::clone(&modbus),
+    let stream_levels_2 = super::modbus_read_stream_flatmap_registers(
+        &modbus,
         crate::modbus::Operation::GetHoldings { address, count },
         Duration::from_secs(120),
-    )
-    .flat_map(move |vs| {
-        let vs = vs.map_err(Arc::new);
-        futures::stream::iter(speed_registers(&nid, address, &LVL_REGISTERS_2, max, vs))
-    });
+        &node_id,
+        LVL_REGISTERS_2
+            .iter()
+            .map(move |(r, p)| (*r, p.clone(), move |v| Box::new(AirflowLevel::new(v)) as _)),
+    );
 
-    let address: u16 = 5060;
+    let address: u16 = const { WS_REGISTERS[0].0.address() };
     let count: u16 = 5062 - address;
-    let nid = node_id.clone();
-    let max = AirflowSpeed::DemandControl;
-    let stream_3 = super::modbus_read_stream(
-        Arc::clone(&modbus),
+    let stream_week_schedule_levels = super::modbus_read_stream_flatmap_registers(
+        &modbus,
         crate::modbus::Operation::GetHoldings { address, count },
         Duration::from_secs(120),
-    )
-    .flat_map(move |vs| {
-        let vs = vs.map_err(Arc::new);
-        futures::stream::iter(speed_registers(&nid, address, &WS_REGISTERS, max, vs))
-    });
+        &node_id,
+        WS_REGISTERS.iter().map(move |(r, p)| {
+            (*r, p.clone(), move |v| {
+                Box::new(WeeklyScheduleLevel::new(v)) as _
+            })
+        }),
+    );
 
-    let address: u16 = 1401;
+    let address: u16 = const { LEVEL_SPEEDS[0].0.address() };
     let count: u16 = 1441 - address;
-    let stream_4 = super::modbus_read_stream(
-        modbus,
+    let stream_level_speeds = super::modbus_read_stream_flatmap_registers(
+        &modbus,
         crate::modbus::Operation::GetHoldings { address, count },
         Duration::from_secs(120),
-    )
-    .flat_map(move |vs| {
-        let vs = vs.map_err(Arc::new);
-        let node_id = node_id.clone();
-        futures::stream::iter(LEVEL_SPEEDS.iter().map(move |(ri, prop_id)| {
-            let kind = PropertyEventKind::from_holdings_response(&vs, |vs| {
-                let Some(value) = extract_value(address, ri.address(), vs) else {
-                    panic!("decoding iaq properties should always succeed");
-                };
-                super::SimpleProperty(value)
-            });
-            PropertyEvent {
-                node_id: node_id.clone(),
-                property_name: prop_id.clone(),
-                kind,
-            }
-        }))
-    });
+        &node_id,
+        LEVEL_SPEEDS
+            .iter()
+            .map(|(r, p)| (*r, p.clone(), |v| Box::new(super::SimpleValue(v)) as _)),
+    );
+
+    let register = const { RegisterIndex::from_name("FAN_MANUAL_STOP_ALLOWED").unwrap() };
+    let address = register.address();
+    let stream_manual_stop = super::modbus_read_stream_flatmap_registers(
+        &modbus,
+        crate::modbus::Operation::GetHoldings { address, count: 1 },
+        Duration::from_secs(120),
+        &node_id,
+        [(register, MANUAL_STOP, |v| {
+            Box::new(BooleanValue::from(v)) as _
+        })],
+    );
+
+    let register = const { RegisterIndex::from_name("FAN_REGULATION_UNIT").unwrap() };
+    let address = register.address();
+    let stream_regulation_type = super::modbus_read_stream_flatmap_registers(
+        &modbus,
+        crate::modbus::Operation::GetHoldings { address, count: 1 },
+        Duration::from_secs(120),
+        &node_id,
+        [(register, REGULATION_TYPE, |v| {
+            Box::new(RegulationType::new(v)) as _
+        })],
+    );
+
     [
-        Box::pin(stream_1),
-        Box::pin(stream_2),
-        Box::pin(stream_3),
-        Box::pin(stream_4),
+        Box::pin(stream_levels_1),
+        Box::pin(stream_levels_2),
+        Box::pin(stream_week_schedule_levels),
+        Box::pin(stream_level_speeds),
+        Box::pin(stream_manual_stop),
+        Box::pin(stream_regulation_type),
     ]
 }

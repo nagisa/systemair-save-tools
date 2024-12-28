@@ -21,3 +21,4 @@ tokio = { version = "1.41.1", features = ["fs"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19" }
 homie5 = { version = "0.4.0", path = "../homie5" }
+strum = { version = "0.26.3", features = ["derive"] }

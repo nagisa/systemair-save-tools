@@ -3,7 +3,7 @@ mod demand_control_node;
 mod fan_speed_setting_node;
 
 use crate::connection::Connection;
-use crate::modbus::{Operation, Request, Response, ResponseKind};
+use crate::modbus::{extract_value, Operation, Request, Response, ResponseKind};
 use crate::registers::{RegisterIndex, Value};
 use futures::stream::SelectAll;
 use futures::{Stream, StreamExt as _};
@@ -250,9 +250,32 @@ enum PropertyEventKind {
     ServerException(u8),
 }
 
-struct SimpleProperty(Value);
+struct SimpleValue(Value);
 
-impl PropertyValue for SimpleProperty {
+impl PropertyValue for SimpleValue {
+    fn value(&self) -> String {
+        self.0.to_string()
+    }
+
+    fn target(&self) -> Option<String> {
+        None
+    }
+}
+
+struct BooleanValue(bool);
+
+impl From<Value> for BooleanValue {
+    fn from(value: Value) -> Self {
+        BooleanValue(match value {
+            Value::U16(v) => v != 0,
+            Value::I16(v) => v != 0,
+            Value::Celsius(v) => v != 0,
+            Value::SpecificHumidity(v) => v != 0,
+        })
+    }
+}
+
+impl PropertyValue for BooleanValue {
     fn value(&self) -> String {
         self.0.to_string()
     }
@@ -331,3 +354,69 @@ fn modbus_read_stream(
     })
 }
 
+fn modbus_read_stream_flatmap<F, S>(
+    modbus: &Arc<Connection>,
+    operation: Operation,
+    period: Duration,
+    mut f: F,
+) -> impl Stream<Item = PropertyEvent>
+where
+    F: FnMut(Result<Response, Arc<ReadStreamError>>) -> S,
+    S: Stream<Item = PropertyEvent>,
+{
+    let stream = modbus_read_stream(Arc::clone(modbus), operation, period);
+    stream.flat_map(move |vs| {
+        let vs = vs.map_err(Arc::new);
+        f(vs)
+    })
+}
+
+fn modbus_read_stream_flatmap_registers<R, F>(
+    modbus: &Arc<Connection>,
+    operation: Operation,
+    period: Duration,
+    node_id: &HomieID,
+    registers: R,
+) -> impl Stream<Item = PropertyEvent>
+where
+    R: IntoIterator<Item = (RegisterIndex, HomieID, F)> + Clone,
+    F: FnOnce(Value) -> Box<dyn PropertyValue>,
+{
+    let node_id = node_id.clone();
+    let start_address = match operation {
+        Operation::GetHoldings { address, count: _ } => address,
+    };
+    modbus_read_stream_flatmap(modbus, operation, period, move |vs| {
+        let node_id = node_id.clone();
+        futures::stream::iter(
+            registers
+                .clone()
+                .into_iter()
+                .map(move |(ri, prop_id, value_cvt)| {
+                    let node_id = node_id.clone();
+                    let kind = match &vs {
+                        Err(e) => PropertyEventKind::ReadError(Arc::clone(&e)),
+                        Ok(Response {
+                            kind: ResponseKind::ErrorCode(e),
+                            ..
+                        }) => PropertyEventKind::ServerException(*e),
+                        Ok(Response {
+                            kind: ResponseKind::GetHoldings { values },
+                            ..
+                        }) => {
+                            let Some(value) = extract_value(start_address, ri.address(), &values)
+                            else {
+                                todo!("some sensible error here");
+                            };
+                            PropertyEventKind::PropertyValue(value_cvt(value))
+                        }
+                    };
+                    PropertyEvent {
+                        node_id: node_id.clone(),
+                        property_name: prop_id.clone(),
+                        kind,
+                    }
+                }),
+        )
+    })
+}
