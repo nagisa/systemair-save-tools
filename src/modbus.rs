@@ -2,6 +2,8 @@ use tokio_util::bytes::Buf;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::trace;
 
+use crate::registers::{RegisterIndex, Value};
+
 #[derive(Debug, Clone, Copy)]
 pub struct Request {
     pub device_id: u8,
@@ -172,3 +174,12 @@ impl Decoder for ModbusRTUCodec {
     }
 }
 impl Codec for ModbusRTUCodec {}
+
+pub fn extract_value(request_base: u16, value_address: u16, response: &[u8]) -> Option<Value> {
+    let value_register = RegisterIndex::from_address(value_address).unwrap();
+    let value_offset = 2 * usize::from(value_address - request_base);
+    let value_data_type = value_register.data_type();
+    value_data_type
+        .from_bytes(&response[value_offset..][..value_data_type.bytes()])
+        .next()
+}

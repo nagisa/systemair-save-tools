@@ -1,8 +1,10 @@
 mod alarm_node;
 mod demand_control_node;
+mod fan_speed_setting_node;
 
 use crate::connection::Connection;
-use crate::modbus::{Operation, Request, Response};
+use crate::modbus::{Operation, Request, Response, ResponseKind};
+use crate::registers::{RegisterIndex, Value};
 use futures::stream::SelectAll;
 use futures::{Stream, StreamExt as _};
 use homie5::client::{Publish, QoS, Subscription};
@@ -31,19 +33,28 @@ impl SystemAirDevice {
         modbus: Arc<Connection>,
     ) -> Self {
         let alarm_node_id = HomieID::new_const("alarm");
-        let demand_control_node_id = HomieID::new_const("demand-control");
+        let demc_node_id = HomieID::new_const("demand-control");
+        let fan_speed_node_id = HomieID::new_const("fan-speed-settings");
         let description = homie5::device_description::DeviceDescriptionBuilder::new()
             .name("SystemAIR SAVE")
             .add_node(alarm_node_id.clone(), alarm_node::description())
-            // .add_node(
-            //     demand_control_node_id.clone(),
-            //     demand_control_node::description(),
-            // )
+            .add_node(demc_node_id.clone(), demand_control_node::description())
+            .add_node(
+                fan_speed_node_id.clone(),
+                fan_speed_setting_node::description(),
+            )
             .build();
         let mut read_stream = SelectAll::new();
         for stream in alarm_node::stream(alarm_node_id, Arc::clone(&modbus)) {
             read_stream.push(stream);
         }
+        for stream in demand_control_node::stream(demc_node_id, Arc::clone(&modbus)) {
+            read_stream.push(stream);
+        }
+        for stream in fan_speed_setting_node::stream(fan_speed_node_id, Arc::clone(&modbus)) {
+            read_stream.push(stream);
+        }
+
         let mut last_values = BTreeMap::new();
         for (n, _, p, _) in description.iter() {
             last_values.insert((n.clone(), p.clone()), None);
@@ -103,53 +114,46 @@ impl SystemAirDevice {
                 kind,
             }) => match kind {
                 PropertyEventKind::PropertyValue(value) => {
-                    let entry = match self.last_values.entry((node_id, prop_id)) {
+                    let (entry, prev) = match self.last_values.entry((node_id, prop_id)) {
                         Entry::Vacant(ve) => {
                             let key = ve.key();
                             panic!("{}/{} was published but not in description", key.0, key.1);
                         }
                         Entry::Occupied(mut oe) => {
-                            match oe.get_mut() {
-                                Some(o) => {
-                                    // TODO: consider tracking value and target changes separately?
-                                    if o.value() == value.value() && o.target() == value.target() {
-                                        return; // No change, skip publishing.
-                                    } else {
-                                        *o = value;
-                                    }
-                                }
-                                v @ None => {
-                                    v.replace(value);
-                                }
-                            }
-                            oe
+                            let previous = oe.get_mut().replace(value);
+                            (oe, previous)
                         }
                     };
                     let key = entry.key();
-                    let value = entry
+                    let prop = entry
                         .get()
                         .as_ref()
                         .expect("the statement above will have put `Some` in this entry");
                     let (value_op, target_op) = self
                         .description
                         .with_property_by_id(&key.0, &key.1, |pd| {
-                            let val = self.protocol.publish_value(
-                                &key.0,
-                                &key.1,
-                                value.value(),
-                                pd.retained,
-                            );
-                            let tgt = self.protocol.publish_target(
-                                &key.0,
-                                &key.1,
-                                value.target(),
-                                pd.retained,
-                            );
+                            let val = prop.value();
+                            let prev_val = prev.as_ref().map(|p| p.value());
+                            let val = (Some(&val) != prev_val.as_ref()).then(|| {
+                                self.protocol
+                                    .publish_value(&key.0, &key.1, val, pd.retained)
+                            });
+                            let tgt = prop.target().and_then(|tgt| {
+                                let prev_tgt = prev.and_then(|p| p.target());
+                                (val.is_some() || Some(&tgt) != prev_tgt.as_ref()).then(|| {
+                                    self.protocol
+                                        .publish_target(&key.0, &key.1, tgt, pd.retained)
+                                })
+                            });
                             (val, tgt)
                         })
                         .expect("property should always be present in device description");
-                    self.mqtt.homie_publish(target_op).await.expect("TODO");
-                    self.mqtt.homie_publish(value_op).await.expect("TODO");
+                    if let Some(target_op) = target_op {
+                        self.mqtt.homie_publish(target_op).await.expect("TODO");
+                    }
+                    if let Some(value_op) = value_op {
+                        self.mqtt.homie_publish(value_op).await.expect("TODO");
+                    }
                 }
                 PropertyEventKind::ReadError(arc) => {
                     // TODO: raise homie device alarm?
@@ -234,7 +238,7 @@ enum ReadStreamError {
 
 trait PropertyValue {
     fn value(&self) -> String;
-    fn target(&self) -> String;
+    fn target(&self) -> Option<String>;
 }
 
 enum PropertyEventKind {
@@ -244,6 +248,40 @@ enum PropertyEventKind {
     ReadError(Arc<ReadStreamError>),
     /// There was a server exception indicated in the response.
     ServerException(u8),
+}
+
+struct SimpleProperty(Value);
+
+impl PropertyValue for SimpleProperty {
+    fn value(&self) -> String {
+        self.0.to_string()
+    }
+
+    fn target(&self) -> Option<String> {
+        None
+    }
+}
+
+impl PropertyEventKind {
+    fn from_holdings_response<V: PropertyValue + 'static>(
+        response: &Result<Response, Arc<ReadStreamError>>,
+        holdings: impl FnOnce(&[u8]) -> V,
+    ) -> Self {
+        match response {
+            Err(e) => return PropertyEventKind::ReadError(Arc::clone(e)),
+            Ok(Response {
+                kind: ResponseKind::ErrorCode(e),
+                ..
+            }) => return PropertyEventKind::ServerException(*e),
+            Ok(Response {
+                kind: ResponseKind::GetHoldings { values },
+                ..
+            }) => {
+                let value = holdings(&values);
+                return PropertyEventKind::PropertyValue(Box::new(value));
+            }
+        }
+    }
 }
 
 struct PropertyEvent {
@@ -275,22 +313,21 @@ fn modbus_read_stream(
                     })
                     .await
                     .map_err(ReadStreamError::Send)?;
-                {
-                    let mut next_slot = next_slot.lock().unwrap_or_else(|e| e.into_inner());
-                    *next_slot = Instant::now() + period;
-                }
                 let Some(result) = outcome else {
                     continue;
                 };
+                let mut next_slot = next_slot.lock().unwrap_or_else(|e| e.into_inner());
                 if result.is_server_busy() {
                     // IAM was busy with other requests. Give it some time…
                     // TODO: maybe add a flag to control this?
-                    // TODO: configurable retries, sleep time?
-                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    // TODO: configurable retry sleep time?
+                    *next_slot = Instant::now() + std::time::Duration::from_millis(25);
                     continue;
                 }
+                *next_slot = Instant::now() + period;
                 return Ok::<_, ReadStreamError>(result);
             }
         }
     })
 }
+

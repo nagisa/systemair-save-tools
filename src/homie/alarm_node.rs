@@ -1,3 +1,19 @@
+//! Exposes the current device alarms as properties.
+//!
+//! The SystemAIR units keep track of two bits worth of information for each alarm (except
+//! summaries):
+//!
+//! * Whether the alarm is firing or not
+//! * Whether the alarm is "pending" for the other state (in case of a firing alarm, clearing it
+//! does not immediately make it go away -- instead it goes into the state "firing but cleared".)
+//!
+//! This perfectly maps to the `$target` mechanism exposed in Homie and so most of the alarms have
+//! an `$target` property associated with them. For consistency the summary alarms use the same
+//! mechanism, even though they cannot be set and will never have a target that isn't equal to the
+//! value.
+//!
+//! TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
+
 use crate::connection::Connection;
 use crate::modbus::{Operation, Response, ResponseKind};
 use crate::registers::{RegisterIndex, Value, ADDRESS_INDICES};
@@ -46,12 +62,12 @@ impl PropertyValue for AlarmValue {
         .to_string()
     }
 
-    fn target(&self) -> String {
-        match self {
+    fn target(&self) -> Option<String> {
+        Some(match self {
             AlarmValue::Clear | AlarmValue::Acknowledged => "clear",
             AlarmValue::Firing | AlarmValue::Evaluating => "firing",
         }
-        .to_string()
+        .to_string())
     }
 }
 
@@ -157,30 +173,20 @@ fn stream_one<const N: usize>(
             let vs = vs.map_err(Arc::new);
             let node_id = node_id.clone();
             futures::stream::iter(registers.iter().map(move |(register_index, prop_id)| {
-                let kind = match &vs {
-                    Err(e) => PropertyEventKind::ReadError(Arc::clone(e)),
-                    Ok(Response {
-                        kind: ResponseKind::ErrorCode(e),
-                        ..
-                    }) => PropertyEventKind::ServerException(*e),
-                    Ok(Response {
-                        kind: ResponseKind::GetHoldings { values },
-                        ..
-                    }) => {
-                        let offset = usize::from(register_index.address() - start_address);
-                        let data_type = register_index.data_type();
-                        let Some(Value::U16(value)) = data_type
-                            .from_bytes(&values[offset..][..data_type.bytes()])
-                            .next()
-                        else {
-                            panic!("decoding alarm value should always succeed")
-                        };
-                        let Ok(value) = AlarmValue::try_from(value) else {
-                            todo!("invalid contents from modbus for alarms, report error")
-                        };
-                        PropertyEventKind::PropertyValue(Box::new(value))
-                    }
-                };
+                let kind = PropertyEventKind::from_holdings_response(&vs, |vs| {
+                    let offset = 2 * usize::from(register_index.address() - start_address);
+                    let data_type = register_index.data_type();
+                    let Some(Value::U16(value)) = data_type
+                        .from_bytes(&vs[offset..][..data_type.bytes()])
+                        .next()
+                    else {
+                        panic!("decoding alarm value should always succeed")
+                    };
+                    let Ok(value) = AlarmValue::try_from(value) else {
+                        todo!("invalid contents from modbus for alarms, report error")
+                    };
+                    value
+                });
                 PropertyEvent {
                     node_id: node_id.clone(),
                     property_name: prop_id.clone(),
@@ -200,7 +206,7 @@ pub fn stream(
         node_id.clone(),
         Arc::clone(&modbus),
         &ALARM_TYPE_SUMMARY_REGISTERS,
-        Duration::from_millis(500),
+        Duration::from_millis(1000),
     );
     let state1_stream = stream_one(
         node_id.clone(),
