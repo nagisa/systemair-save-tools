@@ -70,6 +70,7 @@ pub fn description() -> HomieNodeDescription {
 
 #[repr(u16)]
 #[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
 enum IaqValue {
     Economic,
     Good,
