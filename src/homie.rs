@@ -1,4 +1,5 @@
 mod alarm_node;
+mod compensation_node;
 mod demand_control_node;
 mod fan_speed_setting_node;
 
@@ -35,6 +36,7 @@ impl SystemAirDevice {
         let alarm_node_id = HomieID::new_const("alarm");
         let demc_node_id = HomieID::new_const("demand-control");
         let fan_speed_node_id = HomieID::new_const("fan-speed-settings");
+        let compensation_node_id = HomieID::new_const("compensation");
         let description = homie5::device_description::DeviceDescriptionBuilder::new()
             .name("SystemAIR SAVE")
             .add_node(alarm_node_id.clone(), alarm_node::description())
@@ -42,6 +44,10 @@ impl SystemAirDevice {
             .add_node(
                 fan_speed_node_id.clone(),
                 fan_speed_setting_node::description(),
+            )
+            .add_node(
+                compensation_node_id.clone(),
+                compensation_node::description(),
             )
             .build();
         let mut read_stream = SelectAll::new();
@@ -52,6 +58,9 @@ impl SystemAirDevice {
             read_stream.push(stream);
         }
         for stream in fan_speed_setting_node::stream(fan_speed_node_id, Arc::clone(&modbus)) {
+            read_stream.push(stream);
+        }
+        for stream in compensation_node::stream(compensation_node_id, Arc::clone(&modbus)) {
             read_stream.push(stream);
         }
 
