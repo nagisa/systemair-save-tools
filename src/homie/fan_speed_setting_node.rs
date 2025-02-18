@@ -19,7 +19,7 @@ macro_rules! registers {
     }
 }
 
-static LVL_REGISTERS: [(RegisterIndex, HomieID); 23] = registers![
+static LVL_REGISTERS: [(RegisterIndex, HomieID); 25] = registers![
     (1121, "min-demand-control"),
     (1122, "max-demand-control"),
     (1131, "usermode-manual"),
@@ -43,6 +43,8 @@ static LVL_REGISTERS: [(RegisterIndex, HomieID); 23] = registers![
     (1174, "digital-input-2-extract"),
     (1175, "digital-input-3-supply"),
     (1176, "digital-input-3-extract"),
+    (1177, "pressure-guard-supply"),
+    (1178, "pressure-guard-extract"),
 ];
 
 static LVL_REGISTERS_2: [(RegisterIndex, HomieID); 2] = registers![
