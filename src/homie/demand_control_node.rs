@@ -5,7 +5,8 @@
 //!
 //! Everything else is bog-standard boolean/integer parameters.
 
-use super::{BooleanValue, PropertyEvent, PropertyValue, ReadStreamError};
+use super::common::{homie_enum, BooleanValue};
+use super::{PropertyEvent, PropertyValue, ReadStreamError};
 use crate::connection::Connection;
 use crate::homie::PropertyEventKind;
 use crate::registers::{RegisterIndex, Value};
@@ -34,18 +35,11 @@ static IAQ_LEVEL: HomieID = HomieID::new_const("iaq-level");
 
 pub fn description() -> HomieNodeDescription {
     let mut properties = BTreeMap::new();
-    let boolean = PropertyDescriptionBuilder::new(HomieDataType::Boolean).build();
-    let settable_boolean = PropertyDescriptionBuilder::new(HomieDataType::Boolean)
-        .settable(true)
-        .build();
+    let boolean = BooleanValue::homie_prop_builder().build();
+    let settable_boolean = BooleanValue::homie_prop_builder().settable(true).build();
     let integer = PropertyDescriptionBuilder::new(HomieDataType::Integer).build();
     let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
         .settable(true)
-        .build();
-    let iaq_level_property_format =
-        HomiePropertyFormat::Enum(IaqValue::VARIANTS.iter().copied().map(Into::into).collect());
-    let iaq_level = PropertyDescriptionBuilder::new(HomieDataType::Enum)
-        .format(iaq_level_property_format)
         .build();
     properties.insert(IS_WINTER.clone(), boolean);
     properties.insert(CO2_ENABLED.clone(), settable_boolean.clone());
@@ -60,7 +54,7 @@ pub fn description() -> HomieNodeDescription {
     properties.insert(RH_PBAND.clone(), settable_integer.clone());
     properties.insert(RH_WINTER_SETPOINT.clone(), settable_integer.clone());
     properties.insert(RH_SUMMER_SETPOINT.clone(), settable_integer.clone());
-    properties.insert(IAQ_LEVEL.clone(), iaq_level);
+    properties.insert(IAQ_LEVEL.clone(), homie_enum::<IaqValue>().build());
     HomieNodeDescription {
         name: Some("demand control settings".to_string()),
         r#type: None,
@@ -175,7 +169,7 @@ fn simple_property(
         let Some(value) = extract_value(START_ADDRESS, value_address, vs) else {
             panic!("decoding setpoint properties should always succeed");
         };
-        super::SimpleValue(value)
+        super::common::SimpleValue(value)
     });
     PropertyEvent {
         node_id: node_id.clone(),

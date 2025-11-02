@@ -1,0 +1,17 @@
+{
+    "homie": "5.0",
+    "name": "SystemAIR SAVE heat recovery unit",
+    "version": 0,
+    "nodes": {
+        "alarm": {
+            "name": "Unit alarms",
+            "properties": {
+                "sum": { "datatype": "enum", "format": "clear,firing,waiting" },
+                "filter": { "datatype": "enum", "format": "clear,firing,waiting", "settable": true },
+                "saf_control": { "datatype": "enum", "format": "clear,firing,waiting", "settable": true },
+                "eaf_control": { "datatype": "enum", "format": "clear,firing,waiting", "settable": true },
+                "frost_protection": { "datatype": "enum", "format": "clear,firing,waiting", "settable": true },
+            },
+        }
+    }
+}

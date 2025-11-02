@@ -1,6 +1,6 @@
 //! Exposes fan speed settings as a homie node.
 
-use super::{BooleanValue, PropertyEvent, PropertyValue};
+use super::{homie_enum, homie_enum_format, BooleanValue, PropertyEvent, PropertyValue};
 use crate::connection::Connection;
 use crate::registers::{RegisterIndex, Value};
 use futures::Stream;
@@ -103,26 +103,16 @@ static LEVEL_SPEEDS: [(RegisterIndex, HomieID); 40] = registers![
 const MANUAL_STOP: HomieID = HomieID::new_const("allow-manual-stop");
 const REGULATION_TYPE: HomieID = HomieID::new_const("regulation-type");
 
-fn enum_format(variants: &[&str]) -> HomiePropertyFormat {
-    HomiePropertyFormat::Enum(variants.iter().copied().map(Into::into).collect())
-}
-
 pub fn description() -> HomieNodeDescription {
     let mut properties = BTreeMap::new();
-    let speed = PropertyDescriptionBuilder::new(HomieDataType::Enum)
-        .format(enum_format(AirflowLevel::VARIANTS))
-        .settable(true)
-        .build();
+    let speed = homie_enum::<AirflowLevel>().settable(true).build();
     for (_, name) in &LVL_REGISTERS {
         properties.insert(name.clone(), speed.clone());
     }
     for (_, name) in &LVL_REGISTERS_2 {
         properties.insert(name.clone(), speed.clone());
     }
-    let ws_level = PropertyDescriptionBuilder::new(HomieDataType::Enum)
-        .format(enum_format(WeeklyScheduleLevel::VARIANTS))
-        .settable(true)
-        .build();
+    let ws_level = homie_enum::<WeeklyScheduleLevel>().settable(true).build();
     for (_, name) in &WS_REGISTERS {
         properties.insert(name.clone(), ws_level.clone());
     }
@@ -139,10 +129,7 @@ pub fn description() -> HomieNodeDescription {
         .build();
     properties.insert(MANUAL_STOP.clone(), settable_boolean.clone());
 
-    let fan_regulation_type = PropertyDescriptionBuilder::new(HomieDataType::Enum)
-        .format(enum_format(RegulationType::VARIANTS))
-        .settable(true)
-        .build();
+    let fan_regulation_type = homie_enum::<RegulationType>().settable(true).build();
     properties.insert(REGULATION_TYPE.clone(), fan_regulation_type.clone());
 
     HomieNodeDescription {
@@ -291,7 +278,7 @@ pub fn stream(
 
     let register = const { RegisterIndex::from_name("FAN_MANUAL_STOP_ALLOWED").unwrap() };
     let address = register.address();
-    let stream_manual_stop = super::modbus_read_stream_flatmap_registers(
+    let stream_manual_stop = super::(modbus_read_stream_flatmap_registers(
         &modbus,
         crate::modbus::Operation::GetHoldings { address, count: 1 },
         Duration::from_secs(120),

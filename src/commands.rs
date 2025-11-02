@@ -403,7 +403,7 @@ pub mod mqtt {
         #[clap(long, default_value = "homie/systemair")]
         mqtt_topic_base: String,
 
-        #[clap(long, default_value = "homie/systemair")]
+        #[clap(long, default_value = "systemair-save-tools")]
         device_name: String,
     }
 
