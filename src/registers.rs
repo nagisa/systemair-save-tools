@@ -1451,12 +1451,12 @@ pub static DESCRIPTIONS: &[&str] = &const {
             }
             16003 => "Indicates if the Filter menu is locked. 0=menu locked, 1=menu not locked",
             16004 => {
-                "Indicates if the Week schedule menu islocked. 0=menu locked, 1=menu not locked"
+                "Indicates if the Week schedule menu is locked. 0=menu locked, 1=menu not locked"
             }
             16051 => "Home screen lock",
             16052 => "Filter Change menu lock",
             16053 => "Week schedule menu lock",
-            16101 => "Indicates if the start-up wizard shall beactivated.",
+            16101 => "Indicates if the start-up wizard shall be activated.",
             17001 => "Modbus address of the MB. Only relevant if the MB is a modbus slave.",
             17002 => {
                 "Baudrate of the modbus connection. 0=1200, 1=2400, 2=4800, 3=9600, 4=14400, \
