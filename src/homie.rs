@@ -1,16 +1,16 @@
 mod alarm_node;
 mod common;
+mod node;
 // mod compensation_node;
 // mod demand_control_node;
-// mod fan_speed_setting_node;
-mod node;
+mod fan_speed_setting_node;
 mod read_stream;
 
 use crate::connection::Connection;
+use crate::homie::common::PropertyValue;
 use crate::homie::node::{Node, NodeEvent};
 use crate::homie::read_stream::RegisterEvent;
 use crate::modbus::{Response, ResponseKind};
-use common::PropertyValue;
 use futures::stream::SelectAll;
 use futures::{Stream, StreamExt as _};
 use homie5::client::{Publish, QoS, Subscription};
@@ -45,7 +45,7 @@ impl SystemAirDevice {
         let nodes = [
             Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
             // Box::new(demand_control_node::DemandControlNode) as _,
-            // Box::new(fan_speed_setting_node::FanSpeedSettingsNode) as _,
+            Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new()) as _,
             // Box::new(compensation_node::CompensationNode) as _,
         ];
         let mut description =
@@ -73,6 +73,7 @@ impl SystemAirDevice {
                 };
             }
         }));
+        // FIXME: "simply" create senders for each individual node with the same backing buffer??
         let node_event_stream =
             SelectAll::from_iter(nodes.iter().map(|n| BroadcastStream::new(n.node_events())));
         let nodes = nodes.into_iter().map(|v| (v.node_id(), v)).collect();

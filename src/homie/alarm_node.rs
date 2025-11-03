@@ -14,7 +14,7 @@
 //!
 //! TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
 
-use super::PropertyValue;
+use crate::homie::common::PropertyValue;
 use crate::homie::node::{Node, NodeEvent};
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, strum::FromRepr)]
 #[repr(u8)]
 pub enum AlarmValue {
     Clear = 0,
@@ -37,13 +37,8 @@ pub enum AlarmValue {
 impl TryFrom<Value> for AlarmValue {
     type Error = ();
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Ok(match value.into_inner() {
-            0 => Self::Clear,
-            1 => Self::Firing,
-            2 => Self::Evaluating,
-            3 => Self::Acknowledged,
-            _ => todo!(),
-        })
+        let byte = u8::try_from(value.into_inner()).map_err(|_| ())?;
+        Self::from_repr(byte).ok_or(())
     }
 }
 
@@ -163,16 +158,12 @@ impl Node for AlarmNode {
             properties,
         }
     }
-    fn registers(&self) -> &'static [(RegisterIndex, HomieID)] {
-        &ALARM_STATE_REGISTERS
-    }
 
     fn on_register_value(&mut self, register: RegisterIndex, value: Value) {
-        let registers = self.registers();
-        let Ok(idx) = registers.binary_search_by_key(&register, |v| v.0) else {
+        let Ok(idx) = ALARM_STATE_REGISTERS.binary_search_by_key(&register, |v| v.0) else {
             return;
         };
-        let prop_id = &registers[idx].1;
+        let prop_id = &ALARM_STATE_REGISTERS[idx].1;
         let old_value = self.device_values[idx];
         if old_value == Some(value) {
             return;

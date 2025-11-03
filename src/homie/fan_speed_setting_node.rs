@@ -1,110 +1,105 @@
 //! Exposes fan speed settings as a homie node.
 
-use super::{homie_enum, homie_enum_format, BooleanValue, PropertyEvent, PropertyValue};
-use crate::connection::Connection;
-use crate::homie::node::Node;
-use crate::registers::{RegisterIndex, Value};
-use futures::Stream;
-use homie5::device_description::{
-    HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
+use crate::homie::common::{
+    homie_enum, BooleanValue, PropertyDescription, PropertyValue, UintValue,
 };
-use homie5::{HomieDataType, HomieID};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use strum::VariantNames;
+use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
+use crate::registers::{RegisterIndex, Value};
+use homie5::device_description::{HomieNodeDescription, HomiePropertyDescription};
+use homie5::HomieID;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::broadcast::Sender;
 
-macro_rules! registers {
-    ($(($i: literal, $n: literal),)*) => {
-        const {
-            [$(((RegisterIndex::from_address($i).unwrap(), HomieID::new_const($n))),)*]
+static REGISTERS: [PropertyRegisterEntry; 71] = super::node::property_registers![
+    (1121 is "min-demand-control": AirflowLevel),
+    (1122 is "max-demand-control": AirflowLevel),
+    (1131 is "usermode-manual": AirflowLevel),
+    (1135 is "usermode-crowded-supply": AirflowLevel),
+    (1136 is "usermode-crowded-extract": AirflowLevel),
+    (1137 is "usermode-refresh-supply": AirflowLevel),
+    (1138 is "usermode-refresh-extract": AirflowLevel),
+    (1139 is "usermode-fireplace-supply": AirflowLevel),
+    (1140 is "usermode-fireplace-extract": AirflowLevel),
+    (1141 is "usermode-away-supply": AirflowLevel),
+    (1142 is "usermode-away-extract": AirflowLevel),
+    (1143 is "usermode-holiday-supply": AirflowLevel),
+    (1144 is "usermode-holiday-extract": AirflowLevel),
+    (1145 is "usermode-cooker-hood-supply": AirflowLevel),
+    (1146 is "usermode-cooker-hood-extract": AirflowLevel),
+    (1147 is "usermode-vacuum-cleaner-supply": AirflowLevel),
+    (1148 is "usermode-vacuum-cleaner-extract": AirflowLevel),
+    (1171 is "digital-input-1-supply": AirflowLevel),
+    (1172 is "digital-input-1-extract": AirflowLevel),
+    (1173 is "digital-input-2-supply": AirflowLevel),
+    (1174 is "digital-input-2-extract": AirflowLevel),
+    (1175 is "digital-input-3-supply": AirflowLevel),
+    (1176 is "digital-input-3-extract": AirflowLevel),
+    (1177 is "pressure-guard-supply": AirflowLevel),
+    (1178 is "pressure-guard-extract": AirflowLevel),
+    (1274 is "regulation-type": RegulationType),
+    (1353 is "allow-manual-stop": BooleanValue<true>),
+    (1401 is "supply-percentage-for-minimum": UintValue<true>),
+    (1402 is "extract-percentage-for-minimum": UintValue<true>),
+    (1403 is "supply-percentage-for-low": UintValue<true>),
+    (1404 is "extract-percentage-for-low": UintValue<true>),
+    (1405 is "supply-percentage-for-normal": UintValue<true>),
+    (1406 is "extract-percentage-for-normal": UintValue<true>),
+    (1407 is "supply-percentage-for-high": UintValue<true>),
+    (1408 is "extract-percentage-for-high": UintValue<true>),
+    (1409 is "supply-percentage-for-maximum": UintValue<true>),
+    (1410 is "extract-percentage-for-maximum": UintValue<true>),
+    (1411 is "supply-rpm-for-minimum": UintValue<true>),
+    (1412 is "extract-rpm-for-minimum": UintValue<true>),
+    (1413 is "supply-rpm-for-low": UintValue<true>),
+    (1414 is "extract-rpm-for-low": UintValue<true>),
+    (1415 is "supply-rpm-for-normal": UintValue<true>),
+    (1416 is "extract-rpm-for-normal": UintValue<true>),
+    (1417 is "supply-rpm-for-high": UintValue<true>),
+    (1418 is "extract-rpm-for-high": UintValue<true>),
+    (1419 is "supply-rpm-for-maximum": UintValue<true>),
+    (1420 is "extract-rpm-for-maximum": UintValue<true>),
+    (1421 is "supply-pressure-for-minimum": UintValue<true>),
+    (1422 is "extract-pressure-for-minimum": UintValue<true>),
+    (1423 is "supply-pressure-for-low": UintValue<true>),
+    (1424 is "extract-pressure-for-low": UintValue<true>),
+    (1425 is "supply-pressure-for-normal": UintValue<true>),
+    (1426 is "extract-pressure-for-normal": UintValue<true>),
+    (1427 is "supply-pressure-for-high": UintValue<true>),
+    (1428 is "extract-pressure-for-high": UintValue<true>),
+    (1429 is "supply-pressure-for-maximum": UintValue<true>),
+    (1430 is "extract-pressure-for-maximum": UintValue<true>),
+    (1431 is "supply-flow-for-minimum": UintValue<true>),
+    (1432 is "extract-flow-for-minimum": UintValue<true>),
+    (1433 is "supply-flow-for-low": UintValue<true>),
+    (1434 is "extract-flow-for-low": UintValue<true>),
+    (1435 is "supply-flow-for-normal": UintValue<true>),
+    (1436 is "extract-flow-for-normal": UintValue<true>),
+    (1437 is "supply-flow-for-high": UintValue<true>),
+    (1438 is "extract-flow-for-high": UintValue<true>),
+    (1439 is "supply-flow-for-maximum": UintValue<true>),
+    (1440 is "extract-flow-for-maximum": UintValue<true>),
+    (4112 is "min-free-cooling-supply": AirflowLevel),
+    (4113 is "min-free-cooling-extract": AirflowLevel),
+    (5060 is "during-active-week-schedule": WeeklyScheduleLevel),
+    (5061 is "during-inactive-week-schedule": WeeklyScheduleLevel),
+];
+
+pub struct FanSpeedSettingsNode {
+    device_values: [Option<Value>; REGISTERS.len()],
+    sender: Sender<NodeEvent>,
+}
+
+impl FanSpeedSettingsNode {
+    pub(crate) fn new() -> Self {
+        let (sender, _) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
+        Self {
+            device_values: [None; _],
+            sender,
         }
     }
 }
 
-static LVL_REGISTERS: [(RegisterIndex, HomieID); 25] = registers![
-    (1121, "min-demand-control"),
-    (1122, "max-demand-control"),
-    (1131, "usermode-manual"),
-    (1135, "usermode-crowded-supply"),
-    (1136, "usermode-crowded-extract"),
-    (1137, "usermode-refresh-supply"),
-    (1138, "usermode-refresh-extract"),
-    (1139, "usermode-fireplace-supply"),
-    (1140, "usermode-fireplace-extract"),
-    (1141, "usermode-away-supply"),
-    (1142, "usermode-away-extract"),
-    (1143, "usermode-holiday-supply"),
-    (1144, "usermode-holiday-extract"),
-    (1145, "usermode-cooker-hood-supply"),
-    (1146, "usermode-cooker-hood-extract"),
-    (1147, "usermode-vacuum-cleaner-supply"),
-    (1148, "usermode-vacuum-cleaner-extract"),
-    (1171, "digital-input-1-supply"),
-    (1172, "digital-input-1-extract"),
-    (1173, "digital-input-2-supply"),
-    (1174, "digital-input-2-extract"),
-    (1175, "digital-input-3-supply"),
-    (1176, "digital-input-3-extract"),
-    (1177, "pressure-guard-supply"),
-    (1178, "pressure-guard-extract"),
-];
-
-static LVL_REGISTERS_2: [(RegisterIndex, HomieID); 2] = registers![
-    (4112, "min-free-cooling-supply"),
-    (4113, "min-free-cooling-extract"),
-];
-
-static WS_REGISTERS: [(RegisterIndex, HomieID); 2] = registers![
-    (5060, "during-active-week-schedule"),
-    (5061, "during-inactive-week-schedule"),
-];
-
-static LEVEL_SPEEDS: [(RegisterIndex, HomieID); 40] = registers![
-    (1401, "supply-percentage-for-minimum"),
-    (1402, "extract-percentage-for-minimum"),
-    (1403, "supply-percentage-for-low"),
-    (1404, "extract-percentage-for-low"),
-    (1405, "supply-percentage-for-normal"),
-    (1406, "extract-percentage-for-normal"),
-    (1407, "supply-percentage-for-high"),
-    (1408, "extract-percentage-for-high"),
-    (1409, "supply-percentage-for-maximum"),
-    (1410, "extract-percentage-for-maximum"),
-    (1411, "supply-rpm-for-minimum"),
-    (1412, "extract-rpm-for-minimum"),
-    (1413, "supply-rpm-for-low"),
-    (1414, "extract-rpm-for-low"),
-    (1415, "supply-rpm-for-normal"),
-    (1416, "extract-rpm-for-normal"),
-    (1417, "supply-rpm-for-high"),
-    (1418, "extract-rpm-for-high"),
-    (1419, "supply-rpm-for-maximum"),
-    (1420, "extract-rpm-for-maximum"),
-    (1421, "supply-pressure-for-minimum"),
-    (1422, "extract-pressure-for-minimum"),
-    (1423, "supply-pressure-for-low"),
-    (1424, "extract-pressure-for-low"),
-    (1425, "supply-pressure-for-normal"),
-    (1426, "extract-pressure-for-normal"),
-    (1427, "supply-pressure-for-high"),
-    (1428, "extract-pressure-for-high"),
-    (1429, "supply-pressure-for-maximum"),
-    (1430, "extract-pressure-for-maximum"),
-    (1431, "supply-flow-for-minimum"),
-    (1432, "extract-flow-for-minimum"),
-    (1433, "supply-flow-for-low"),
-    (1434, "extract-flow-for-low"),
-    (1435, "supply-flow-for-normal"),
-    (1436, "extract-flow-for-normal"),
-    (1437, "supply-flow-for-high"),
-    (1438, "extract-flow-for-high"),
-    (1439, "supply-flow-for-maximum"),
-    (1440, "extract-flow-for-maximum"),
-];
-
-const MANUAL_STOP: HomieID = HomieID::new_const("allow-manual-stop");
-const REGULATION_TYPE: HomieID = HomieID::new_const("regulation-type");
-
-pub struct FanSpeedSettingsNode;
 impl Node for FanSpeedSettingsNode {
     fn node_id(&self) -> HomieID {
         HomieID::new_const("fan-speed-settings")
@@ -112,38 +107,74 @@ impl Node for FanSpeedSettingsNode {
 
     fn description(&self) -> HomieNodeDescription {
         let mut properties = BTreeMap::new();
-        let speed = homie_enum::<AirflowLevel>().settable(true).build();
-        for (_, name) in &LVL_REGISTERS {
-            properties.insert(name.clone(), speed.clone());
+        for prop_register in &REGISTERS {
+            properties.insert(
+                prop_register.prop_id.clone(),
+                (prop_register.mk_description)(),
+            );
         }
-        for (_, name) in &LVL_REGISTERS_2 {
-            properties.insert(name.clone(), speed.clone());
-        }
-        let ws_level = homie_enum::<WeeklyScheduleLevel>().settable(true).build();
-        for (_, name) in &WS_REGISTERS {
-            properties.insert(name.clone(), ws_level.clone());
-        }
-
-        let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
-            .settable(true)
-            .build();
-        for (_, name) in &LEVEL_SPEEDS {
-            properties.insert(name.clone(), settable_integer.clone());
-        }
-
-        let settable_boolean = PropertyDescriptionBuilder::new(HomieDataType::Boolean)
-            .settable(true)
-            .build();
-        properties.insert(MANUAL_STOP.clone(), settable_boolean.clone());
-
-        let fan_regulation_type = homie_enum::<RegulationType>().settable(true).build();
-        properties.insert(REGULATION_TYPE.clone(), fan_regulation_type.clone());
-
         HomieNodeDescription {
             name: Some("fan speed settings".to_string()),
             r#type: None,
             properties,
         }
+    }
+
+    fn on_register_value(&mut self, register: RegisterIndex, value: Value) {
+        let Ok(idx) = REGISTERS.binary_search_by_key(&register, |v| v.register) else {
+            return;
+        };
+        let old_value = self.device_values[idx];
+        if old_value == Some(value) {
+            return;
+        }
+        self.device_values[idx] = Some(value);
+        let PropertyRegisterEntry {
+            prop_id,
+            from_value,
+            ..
+        } = &REGISTERS[idx];
+        let old_value = old_value.map(from_value);
+        let new_value = from_value(value);
+        let (tgt_changed, val_changed, new) = match (old_value, new_value) {
+            (None | Some(Err(_)) | Some(Ok(_)), Err(_)) => {
+                tracing::debug!(
+                    ?value,
+                    address = register.address(),
+                    ?prop_id,
+                    "could not parse value from device"
+                );
+                return;
+            }
+            (None | Some(Err(_)), Ok(new)) => (new.has_target(), true, new),
+            (Some(Ok(old)), Ok(new)) => (
+                new.has_target() && old.target() != new.target(),
+                old.value() != new.value(),
+                new,
+            ),
+        };
+        if tgt_changed {
+            let _ignore_no_receivers = self.sender.send(NodeEvent::TargetChanged {
+                node_id: self.node_id(),
+                prop_id: prop_id.clone(),
+                new: Arc::clone(&new) as _,
+            });
+        }
+        if val_changed {
+            let _ignore_no_receivers = self.sender.send(NodeEvent::PropertyChanged {
+                node_id: self.node_id(),
+                prop_id: prop_id.clone(),
+                new,
+            });
+        }
+    }
+
+    fn node_events(&self) -> tokio::sync::broadcast::Receiver<NodeEvent> {
+        self.sender.subscribe()
+    }
+
+    fn values_populated(&self) -> bool {
+        self.device_values.iter().all(|v| v.is_some())
     }
 }
 
@@ -158,20 +189,20 @@ enum AirflowLevel {
     High = 4,
     Maximum = 5,
 }
-
-impl AirflowLevel {
-    fn new(value: Value) -> Self {
-        Self::from_repr(value.into_inner()).expect("TODO")
-    }
-}
-
 impl PropertyValue for AirflowLevel {
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }
-
-    fn target(&self) -> Option<String> {
-        None
+}
+impl PropertyDescription for AirflowLevel {
+    fn description() -> HomiePropertyDescription {
+        homie_enum::<AirflowLevel>().settable(true).build()
+    }
+}
+impl TryFrom<Value> for AirflowLevel {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::from_repr(value.into_inner()).ok_or(())
     }
 }
 
@@ -186,20 +217,20 @@ enum WeeklyScheduleLevel {
     High = 4,
     DemandControl = 5,
 }
-
-impl WeeklyScheduleLevel {
-    fn new(value: Value) -> Self {
-        Self::from_repr(value.into_inner()).expect("TODO")
-    }
-}
-
 impl PropertyValue for WeeklyScheduleLevel {
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }
-
-    fn target(&self) -> Option<String> {
-        None
+}
+impl PropertyDescription for WeeklyScheduleLevel {
+    fn description() -> HomiePropertyDescription {
+        homie_enum::<WeeklyScheduleLevel>().settable(true).build()
+    }
+}
+impl TryFrom<Value> for WeeklyScheduleLevel {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::from_repr(value.into_inner()).ok_or(())
     }
 }
 
@@ -207,25 +238,25 @@ impl PropertyValue for WeeklyScheduleLevel {
 #[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
 #[strum(serialize_all = "kebab-case")]
 enum RegulationType {
-    Manual,
-    RPM,
-    ConstantPressure,
-    ConstantFlow,
-    External,
+    Manual = 0,
+    RPM = 1,
+    ConstantPressure = 2,
+    ConstantFlow = 3,
+    External = 4,
 }
-
-impl RegulationType {
-    fn new(value: Value) -> Self {
-        Self::from_repr(value.into_inner()).expect("TODO")
+impl TryFrom<Value> for RegulationType {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Self::from_repr(value.into_inner()).ok_or(())
     }
 }
-
 impl PropertyValue for RegulationType {
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }
-
-    fn target(&self) -> Option<String> {
-        None
+}
+impl PropertyDescription for RegulationType {
+    fn description() -> HomiePropertyDescription {
+        homie_enum::<RegulationType>().settable(true).build()
     }
 }
