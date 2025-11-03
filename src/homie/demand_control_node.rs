@@ -8,6 +8,7 @@
 use super::common::{homie_enum, BooleanValue};
 use super::{PropertyEvent, PropertyValue, ReadStreamError};
 use crate::connection::Connection;
+use crate::homie::node::Node;
 use crate::homie::PropertyEventKind;
 use crate::registers::{RegisterIndex, Value};
 use futures::Stream;
@@ -33,32 +34,39 @@ static RH_WINTER_SETPOINT: HomieID = HomieID::new_const("rh-winter-setpoint");
 static RH_SUMMER_SETPOINT: HomieID = HomieID::new_const("rh-summer-setpoint");
 static IAQ_LEVEL: HomieID = HomieID::new_const("iaq-level");
 
-pub fn description() -> HomieNodeDescription {
-    let mut properties = BTreeMap::new();
-    let boolean = BooleanValue::homie_prop_builder().build();
-    let settable_boolean = BooleanValue::homie_prop_builder().settable(true).build();
-    let integer = PropertyDescriptionBuilder::new(HomieDataType::Integer).build();
-    let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
-        .settable(true)
-        .build();
-    properties.insert(IS_WINTER.clone(), boolean);
-    properties.insert(CO2_ENABLED.clone(), settable_boolean.clone());
-    properties.insert(RH_ENABLED.clone(), settable_boolean.clone());
-    properties.insert(CO2.clone(), settable_integer.clone());
-    properties.insert(RH.clone(), settable_integer.clone());
-    properties.insert(CO2_HIGHEST.clone(), integer.clone());
-    properties.insert(RH_HIGHEST.clone(), integer.clone());
-    properties.insert(CO2_DEMAND.clone(), integer.clone());
-    properties.insert(RH_DEMAND.clone(), integer.clone());
-    properties.insert(CO2_PBAND.clone(), settable_integer.clone());
-    properties.insert(RH_PBAND.clone(), settable_integer.clone());
-    properties.insert(RH_WINTER_SETPOINT.clone(), settable_integer.clone());
-    properties.insert(RH_SUMMER_SETPOINT.clone(), settable_integer.clone());
-    properties.insert(IAQ_LEVEL.clone(), homie_enum::<IaqValue>().build());
-    HomieNodeDescription {
-        name: Some("demand control settings".to_string()),
-        r#type: None,
-        properties,
+pub struct DemandControlNode;
+
+impl Node for DemandControlNode {
+    fn node_id(&self) -> HomieID {
+        HomieID::new_const("demand-control")
+    }
+    fn description(&self) -> HomieNodeDescription {
+        let mut properties = BTreeMap::new();
+        let boolean = BooleanValue::homie_prop_builder().build();
+        let settable_boolean = BooleanValue::homie_prop_builder().settable(true).build();
+        let integer = PropertyDescriptionBuilder::new(HomieDataType::Integer).build();
+        let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
+            .settable(true)
+            .build();
+        properties.insert(IS_WINTER.clone(), boolean);
+        properties.insert(CO2_ENABLED.clone(), settable_boolean.clone());
+        properties.insert(RH_ENABLED.clone(), settable_boolean.clone());
+        properties.insert(CO2.clone(), settable_integer.clone());
+        properties.insert(RH.clone(), settable_integer.clone());
+        properties.insert(CO2_HIGHEST.clone(), integer.clone());
+        properties.insert(RH_HIGHEST.clone(), integer.clone());
+        properties.insert(CO2_DEMAND.clone(), integer.clone());
+        properties.insert(RH_DEMAND.clone(), integer.clone());
+        properties.insert(CO2_PBAND.clone(), settable_integer.clone());
+        properties.insert(RH_PBAND.clone(), settable_integer.clone());
+        properties.insert(RH_WINTER_SETPOINT.clone(), settable_integer.clone());
+        properties.insert(RH_SUMMER_SETPOINT.clone(), settable_integer.clone());
+        properties.insert(IAQ_LEVEL.clone(), homie_enum::<IaqValue>().build());
+        HomieNodeDescription {
+            name: Some("demand control settings".to_string()),
+            r#type: None,
+            properties,
+        }
     }
 }
 
@@ -176,50 +184,4 @@ fn simple_property(
         property_name: prop_id.clone(),
         kind,
     }
-}
-
-pub fn stream(
-    node_id: HomieID,
-    modbus: Arc<Connection>,
-) -> [std::pin::Pin<Box<dyn Stream<Item = PropertyEvent>>>; 2] {
-    let node_id1 = node_id.clone();
-    let stream1 = super::modbus_read_stream_flatmap(
-        &modbus,
-        crate::modbus::Operation::GetHoldings {
-            address: START_ADDRESS,
-            count: REGISTER_COUNT,
-        },
-        Duration::from_millis(5000),
-        move |vs| {
-            let node_id = node_id1.clone();
-            futures::stream::iter([
-                boolean_property(&node_id, &RH_ENABLED, 1035, &vs),
-                boolean_property(&node_id, &IS_WINTER, 1039, &vs),
-                boolean_property(&node_id, &CO2_ENABLED, 1044, &vs),
-                property_with_setpoint(&node_id, &RH, 1012, 1011, &vs),
-                property_with_setpoint(&node_id, &CO2, 1022, 1021, &vs),
-                simple_property(&node_id, &RH_HIGHEST, 1001, &vs),
-                simple_property(&node_id, &CO2_HIGHEST, 1002, &vs),
-                simple_property(&node_id, &RH_DEMAND, 1019, &vs),
-                simple_property(&node_id, &CO2_DEMAND, 1029, &vs),
-                simple_property(&node_id, &RH_PBAND, 1031, &vs),
-                simple_property(&node_id, &CO2_PBAND, 1041, &vs),
-                simple_property(&node_id, &RH_WINTER_SETPOINT, 1034, &vs),
-                simple_property(&node_id, &RH_SUMMER_SETPOINT, 1033, &vs),
-            ])
-        },
-    );
-
-    let register = const { RegisterIndex::from_name("IAQ_LEVEL").unwrap() };
-    let address = register.address();
-    let stream_iaq_value = super::modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count: 1 },
-        Duration::from_millis(30000),
-        &node_id,
-        [(register, IAQ_LEVEL.clone(), |v| {
-            Box::new(IaqValue::new(v)) as _
-        })],
-    );
-    [Box::pin(stream1), Box::pin(stream_iaq_value)]
 }

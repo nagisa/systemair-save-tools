@@ -1,4 +1,4 @@
-use crate::commands::registers;
+use super::ReadStreamError;
 use crate::connection::Connection;
 use crate::modbus::{Operation, Request, Response, ResponseKind};
 use crate::registers::{RegisterIndex, Value, ADDRESSES};
@@ -8,8 +8,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
-
-use super::ReadStreamError;
 
 macro_rules! range {
     ($($from: literal ..= $to: literal every $n: expr,)*) => {
@@ -23,7 +21,7 @@ macro_rules! range {
     }
 }
 
-// FIXME: may want to have read periods configurable...
+// FIXME: may want to have read periods configurable by the user...
 const READS: [(RegisterIndex, RegisterIndex, Duration); 39] = range![
     1001..=1044 every Duration::from_secs(15),
     1101..=1190 every Duration::from_secs(120), // NB: IAQ level may want frequent reads.
@@ -91,8 +89,11 @@ const _ASSERT_ALL_REGISTERS_COVERED: () = const {
 /// Produces a stream that reads **all** the registers at an appropriate-ish reading frequency.
 pub(crate) fn read_device(
     modbus: Arc<Connection>,
-) -> SelectAll<Pin<Box<dyn Stream<Item = RegisterEvent>>>> {
-    let mut read_stream: SelectAll<Pin<Box<dyn Stream<Item = RegisterEvent>>>> = SelectAll::new();
+) -> SelectAll<Pin<Box<dyn Send + Sync + Stream<Item = RegisterEvent>>>> {
+    let mut read_stream: SelectAll<Pin<Box<dyn Send + Sync + Stream<Item = _>>>> = SelectAll::new();
+    // FIXME: in some cases we want to read registers frequently (e.g. `1590{1,2,3}` and if they
+    // change, then read all alarms) and not much reading otherwise. Similarly we may want to
+    // quickly read some registers after other registers were written.
     for (from, to, period) in READS {
         let stream = modbus_stream_register_changes(&modbus, from, to, period);
         read_stream.push(Box::pin(stream));
@@ -104,7 +105,7 @@ fn modbus_read_stream(
     modbus: Arc<Connection>,
     operation: Operation,
     period: Duration,
-) -> impl Stream<Item = Result<Response, ReadStreamError>> {
+) -> impl Send + Sync + Stream<Item = Result<Response, ReadStreamError>> {
     let next_slot = Arc::new(Mutex::new(Instant::now()));
     futures::stream::repeat(modbus.new_transaction_id()).then(move |transaction_id| {
         let modbus = Arc::clone(&modbus);
@@ -141,11 +142,13 @@ fn modbus_read_stream(
     })
 }
 
+#[derive(Clone)]
 pub(crate) struct RegisterEvent {
     pub(crate) register: RegisterIndex,
     pub(crate) kind: RegisterEventKind,
 }
 
+#[derive(Clone, Debug)]
 pub(crate) enum RegisterEventKind {
     /// Value has been read out.
     Value(Value),

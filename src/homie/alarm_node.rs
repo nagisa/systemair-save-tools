@@ -14,36 +14,30 @@
 //!
 //! TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
 
-use crate::connection::Connection;
-use crate::modbus::{Operation, Response, ResponseKind};
-use crate::registers::{RegisterIndex, Value, ADDRESS_INDICES};
-use futures::future::Lazy;
-use futures::{Stream, StreamExt as _};
+use super::PropertyValue;
+use crate::homie::node::{Node, NodeEvent};
+use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
 use homie5::{HomieDataType, HomieID};
 use std::collections::BTreeMap;
-use std::pin::pin;
-use std::sync::{Arc, LazyLock};
-use std::time::Duration;
-use tracing::info;
-
-use super::{PropertyEvent, PropertyEventKind, PropertyValue, ReadStreamError};
+use std::sync::Arc;
+use tokio::sync::broadcast::Sender;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
-enum AlarmValue {
+pub enum AlarmValue {
     Clear = 0,
     Firing = 1,
     Evaluating = 2,
     Acknowledged = 3,
 }
 
-impl TryFrom<u16> for AlarmValue {
+impl TryFrom<Value> for AlarmValue {
     type Error = ();
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
-        Ok(match value {
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Ok(match value.into_inner() {
             0 => Self::Clear,
             1 => Self::Firing,
             2 => Self::Evaluating,
@@ -73,6 +67,15 @@ impl PropertyValue for AlarmValue {
     }
 }
 
+impl AlarmValue {
+    fn firing(&self) -> bool {
+        matches!(self, AlarmValue::Firing | AlarmValue::Acknowledged)
+    }
+    fn targetting_firing(&self) -> bool {
+        matches!(self, AlarmValue::Firing | AlarmValue::Evaluating)
+    }
+}
+
 macro_rules! registers {
     ($(($i: literal, $n: literal),)*) => {
         const {
@@ -81,7 +84,7 @@ macro_rules! registers {
     }
 }
 
-static ALARM_STATE_REGISTERS_1: [(RegisterIndex, HomieID); 25] = registers![
+static ALARM_STATE_REGISTERS: [(RegisterIndex, HomieID); 35] = registers![
     (15002, "supply-air-fan-control"),
     (15009, "extract-air-fan-control"),
     (15016, "frost-protection"),
@@ -107,8 +110,6 @@ static ALARM_STATE_REGISTERS_1: [(RegisterIndex, HomieID); 25] = registers![
     (15170, "co2"),
     (15177, "low-supply-air-temperature"),
     (15184, "byf"), // TODO: de-TLA this name: probably has something to do with bypass damper.
-];
-static ALARM_STATE_REGISTERS_2: [(RegisterIndex, HomieID); 7] = registers![
     (15502, "manual-override-outputs"),
     (15509, "pdm-room-humidity-sensor"), // PDM = pulse density modulation
     (15516, "pdm-extract-room-temperature"),
@@ -116,101 +117,100 @@ static ALARM_STATE_REGISTERS_2: [(RegisterIndex, HomieID); 7] = registers![
     (15530, "overheat-temperature"),
     (15537, "fire"),
     (15544, "filter-warning"),
-];
-static ALARM_TYPE_SUMMARY_REGISTERS: [(RegisterIndex, HomieID); 3] = registers![
     (15901, "summary-type-a"),
     (15902, "summary-type-b"),
     (15903, "summary-type-c"),
 ];
 
-pub fn description() -> HomieNodeDescription {
-    let alarm_property_format =
-        HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
-    let properties = ALARM_STATE_REGISTERS_1
-        .iter()
-        .chain(ALARM_STATE_REGISTERS_2.iter())
-        .chain(ALARM_TYPE_SUMMARY_REGISTERS.iter())
-        .map(|(register_index, property_id)| {
-            (
-                property_id.clone(),
-                PropertyDescriptionBuilder::new(HomieDataType::Enum)
-                    .settable(register_index.mode().is_writable())
-                    .retained(true)
-                    .format(alarm_property_format.clone())
-                    .build(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    HomieNodeDescription {
-        name: Some("Device alarm management".to_string()),
-        r#type: None,
-        properties,
+pub struct AlarmNode {
+    device_values: [Option<Value>; ALARM_STATE_REGISTERS.len()],
+    sender: Sender<NodeEvent>,
+}
+
+impl AlarmNode {
+    pub fn new() -> Self {
+        let (sender, _) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
+        Self {
+            device_values: [None; ALARM_STATE_REGISTERS.len()],
+            sender: sender,
+        }
     }
 }
 
-fn get_holdings_for(registers: &[(RegisterIndex, HomieID)]) -> Operation {
-    let init = (u16::MAX, u16::MIN);
-    let (start, end) = registers
-        .iter()
-        .fold((u16::MAX, u16::MIN), |(min, max), &(v, _)| {
-            (v.address().min(min), v.address().max(max))
-        });
-    assert!(start != init.0);
-    assert!(end != init.1);
-    Operation::GetHoldings {
-        address: start,
-        count: 1 + (end - start),
+impl Node for AlarmNode {
+    fn node_id(&self) -> HomieID {
+        HomieID::new_const("alarm")
+    }
+    fn description(&self) -> HomieNodeDescription {
+        let alarm_property_format =
+            HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
+        let properties = ALARM_STATE_REGISTERS
+            .iter()
+            .map(|(register_index, property_id)| {
+                (
+                    property_id.clone(),
+                    PropertyDescriptionBuilder::new(HomieDataType::Enum)
+                        .settable(register_index.mode().is_writable())
+                        .retained(true)
+                        .format(alarm_property_format.clone())
+                        .build(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        HomieNodeDescription {
+            name: Some("Device alarm management".to_string()),
+            r#type: None,
+            properties,
+        }
+    }
+    fn registers(&self) -> &'static [(RegisterIndex, HomieID)] {
+        &ALARM_STATE_REGISTERS
+    }
+
+    fn on_register_value(&mut self, register: RegisterIndex, value: Value) {
+        let registers = self.registers();
+        let Ok(idx) = registers.binary_search_by_key(&register, |v| v.0) else {
+            return;
+        };
+        let prop_id = &registers[idx].1;
+        let old_value = self.device_values[idx];
+        if old_value == Some(value) {
+            return;
+        }
+        self.device_values[idx] = Some(value);
+        let old_value = old_value.map(AlarmValue::try_from);
+        let new = AlarmValue::try_from(value);
+        let (tgt_changed, val_changed, new) = match (old_value, new) {
+            (None | Some(Err(_)) | Some(Ok(_)), Err(_)) => return,
+            (None | Some(Err(_)), Ok(new)) => (true, true, new),
+            (Some(Ok(old)), Ok(new)) => (
+                old.targetting_firing() != new.targetting_firing(),
+                old.firing() != new.firing(),
+                new,
+            ),
+        };
+        let new = Arc::new(new);
+        if tgt_changed {
+            let _ignore_no_receivers = self.sender.send(NodeEvent::TargetChanged {
+                node_id: self.node_id(),
+                prop_id: prop_id.clone(),
+                new: Arc::clone(&new) as _,
+            });
+        }
+        if val_changed {
+            let _ignore_no_receivers = self.sender.send(NodeEvent::PropertyChanged {
+                node_id: self.node_id(),
+                prop_id: prop_id.clone(),
+                new,
+            });
+        }
+    }
+
+    fn node_events(&self) -> tokio::sync::broadcast::Receiver<NodeEvent> {
+        self.sender.subscribe()
+    }
+
+    fn values_populated(&self) -> bool {
+        self.device_values.iter().all(|v| v.is_some())
     }
 }
-
-// fn stream_one<const N: usize>(
-//     node_id: &HomieID,
-//     modbus: &Arc<Connection>,
-//     registers: &'static [(RegisterIndex, HomieID); N],
-//     polling_period: Duration,
-// ) -> impl Stream<Item = PropertyEvent> {
-//     super::modbus_read_stream_flatmap_registers(
-//         modbus,
-//         get_holdings_for(registers),
-//         polling_period,
-//         node_id,
-//         registers.iter().map(|(r, p)| {
-//             (*r, p.clone(), |v: Value| {
-//                 let Ok(value) = AlarmValue::try_from(v.into_inner()) else {
-//                     todo!("invalid contents from modbus for alarms, report error")
-//                 };
-//                 Box::new(value) as _
-//             })
-//         }),
-//     )
-// }
-
-// TODO: when summary registers change, read the alarm states immediately.
-// pub fn stream(
-//     node_id: HomieID,
-//     modbus: Arc<Connection>,
-// ) -> [std::pin::Pin<Box<dyn Stream<Item = PropertyEvent>>>; 3] {
-//     let summary_stream = stream_one(
-//         &node_id,
-//         &modbus,
-//         &ALARM_TYPE_SUMMARY_REGISTERS,
-//         Duration::from_millis(1000),
-//     );
-//     let state1_stream = stream_one(
-//         &node_id,
-//         &modbus,
-//         &ALARM_STATE_REGISTERS_1,
-//         Duration::from_millis(30000),
-//     );
-//     let state2_stream = stream_one(
-//         &node_id,
-//         &modbus,
-//         &ALARM_STATE_REGISTERS_2,
-//         Duration::from_millis(30000),
-//     );
-//     [
-//         Box::pin(summary_stream),
-//         Box::pin(state1_stream),
-//         Box::pin(state2_stream),
-//     ]
-// }

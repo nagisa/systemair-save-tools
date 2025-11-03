@@ -16,9 +16,10 @@ rumqttc = { version = "0.22", features = ["url"] }
 serde_json = "1.0.133"
 serde = { version = "1.0.215", features = ["derive"] }
 thiserror = "2.0.3"
-tokio-util = { version = "0.7.12", features = ["codec", "time"] }
+tokio-util = { version = "0.7.12", features = ["codec", "rt", "time"] }
 tokio = { version = "1.41.1", features = ["fs"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19" }
-homie5 = { version = "0.5.0" }
+homie5 = { version = "0.8.0" }
 strum = { version = "0.26.3", features = ["derive"] }
+tokio-stream = { version = "0.1.17", features = ["sync"] }

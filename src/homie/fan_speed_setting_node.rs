@@ -2,6 +2,7 @@
 
 use super::{homie_enum, homie_enum_format, BooleanValue, PropertyEvent, PropertyValue};
 use crate::connection::Connection;
+use crate::homie::node::Node;
 use crate::registers::{RegisterIndex, Value};
 use futures::Stream;
 use homie5::device_description::{
@@ -103,39 +104,46 @@ static LEVEL_SPEEDS: [(RegisterIndex, HomieID); 40] = registers![
 const MANUAL_STOP: HomieID = HomieID::new_const("allow-manual-stop");
 const REGULATION_TYPE: HomieID = HomieID::new_const("regulation-type");
 
-pub fn description() -> HomieNodeDescription {
-    let mut properties = BTreeMap::new();
-    let speed = homie_enum::<AirflowLevel>().settable(true).build();
-    for (_, name) in &LVL_REGISTERS {
-        properties.insert(name.clone(), speed.clone());
-    }
-    for (_, name) in &LVL_REGISTERS_2 {
-        properties.insert(name.clone(), speed.clone());
-    }
-    let ws_level = homie_enum::<WeeklyScheduleLevel>().settable(true).build();
-    for (_, name) in &WS_REGISTERS {
-        properties.insert(name.clone(), ws_level.clone());
+pub struct FanSpeedSettingsNode;
+impl Node for FanSpeedSettingsNode {
+    fn node_id(&self) -> HomieID {
+        HomieID::new_const("fan-speed-settings")
     }
 
-    let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
-        .settable(true)
-        .build();
-    for (_, name) in &LEVEL_SPEEDS {
-        properties.insert(name.clone(), settable_integer.clone());
-    }
+    fn description(&self) -> HomieNodeDescription {
+        let mut properties = BTreeMap::new();
+        let speed = homie_enum::<AirflowLevel>().settable(true).build();
+        for (_, name) in &LVL_REGISTERS {
+            properties.insert(name.clone(), speed.clone());
+        }
+        for (_, name) in &LVL_REGISTERS_2 {
+            properties.insert(name.clone(), speed.clone());
+        }
+        let ws_level = homie_enum::<WeeklyScheduleLevel>().settable(true).build();
+        for (_, name) in &WS_REGISTERS {
+            properties.insert(name.clone(), ws_level.clone());
+        }
 
-    let settable_boolean = PropertyDescriptionBuilder::new(HomieDataType::Boolean)
-        .settable(true)
-        .build();
-    properties.insert(MANUAL_STOP.clone(), settable_boolean.clone());
+        let settable_integer = PropertyDescriptionBuilder::new(HomieDataType::Integer)
+            .settable(true)
+            .build();
+        for (_, name) in &LEVEL_SPEEDS {
+            properties.insert(name.clone(), settable_integer.clone());
+        }
 
-    let fan_regulation_type = homie_enum::<RegulationType>().settable(true).build();
-    properties.insert(REGULATION_TYPE.clone(), fan_regulation_type.clone());
+        let settable_boolean = PropertyDescriptionBuilder::new(HomieDataType::Boolean)
+            .settable(true)
+            .build();
+        properties.insert(MANUAL_STOP.clone(), settable_boolean.clone());
 
-    HomieNodeDescription {
-        name: Some("fan speed settings".to_string()),
-        r#type: None,
-        properties,
+        let fan_regulation_type = homie_enum::<RegulationType>().settable(true).build();
+        properties.insert(REGULATION_TYPE.clone(), fan_regulation_type.clone());
+
+        HomieNodeDescription {
+            name: Some("fan speed settings".to_string()),
+            r#type: None,
+            properties,
+        }
     }
 }
 
@@ -220,92 +228,4 @@ impl PropertyValue for RegulationType {
     fn target(&self) -> Option<String> {
         None
     }
-}
-
-pub fn stream(
-    node_id: HomieID,
-    modbus: Arc<Connection>,
-) -> [std::pin::Pin<Box<dyn Stream<Item = PropertyEvent>>>; 6] {
-    let address: u16 = const { LVL_REGISTERS[0].0.address() };
-    let count: u16 = 1179 - address;
-    let stream_levels_1 = super::modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count },
-        Duration::from_secs(120),
-        &node_id,
-        LVL_REGISTERS
-            .iter()
-            .map(move |(r, p)| (*r, p.clone(), move |v| Box::new(AirflowLevel::new(v)) as _)),
-    );
-
-    let address: u16 = const { LVL_REGISTERS_2[0].0.address() };
-    let count: u16 = 4114 - address;
-    let stream_levels_2 = super::modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count },
-        Duration::from_secs(120),
-        &node_id,
-        LVL_REGISTERS_2
-            .iter()
-            .map(move |(r, p)| (*r, p.clone(), move |v| Box::new(AirflowLevel::new(v)) as _)),
-    );
-
-    let address: u16 = const { WS_REGISTERS[0].0.address() };
-    let count: u16 = 5062 - address;
-    let stream_week_schedule_levels = super::modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count },
-        Duration::from_secs(120),
-        &node_id,
-        WS_REGISTERS.iter().map(move |(r, p)| {
-            (*r, p.clone(), move |v| {
-                Box::new(WeeklyScheduleLevel::new(v)) as _
-            })
-        }),
-    );
-
-    let address: u16 = const { LEVEL_SPEEDS[0].0.address() };
-    let count: u16 = 1441 - address;
-    let stream_level_speeds = super::modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count },
-        Duration::from_secs(120),
-        &node_id,
-        LEVEL_SPEEDS
-            .iter()
-            .map(|(r, p)| (*r, p.clone(), |v| Box::new(super::SimpleValue(v)) as _)),
-    );
-
-    let register = const { RegisterIndex::from_name("FAN_MANUAL_STOP_ALLOWED").unwrap() };
-    let address = register.address();
-    let stream_manual_stop = super::(modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count: 1 },
-        Duration::from_secs(120),
-        &node_id,
-        [(register, MANUAL_STOP, |v| {
-            Box::new(BooleanValue::from(v)) as _
-        })],
-    );
-
-    let register = const { RegisterIndex::from_name("FAN_REGULATION_UNIT").unwrap() };
-    let address = register.address();
-    let stream_regulation_type = super::modbus_read_stream_flatmap_registers(
-        &modbus,
-        crate::modbus::Operation::GetHoldings { address, count: 1 },
-        Duration::from_secs(120),
-        &node_id,
-        [(register, REGULATION_TYPE, |v| {
-            Box::new(RegulationType::new(v)) as _
-        })],
-    );
-
-    [
-        Box::pin(stream_levels_1),
-        Box::pin(stream_levels_2),
-        Box::pin(stream_week_schedule_levels),
-        Box::pin(stream_level_speeds),
-        Box::pin(stream_manual_stop),
-        Box::pin(stream_regulation_type),
-    ]
 }

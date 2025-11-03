@@ -147,7 +147,7 @@ impl Mode {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub struct RegisterIndex(u16);
 
 impl RegisterIndex {

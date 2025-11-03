@@ -366,15 +366,11 @@ pub mod read {
 }
 
 pub mod mqtt {
-    use std::sync::Arc;
-
-    use homie5::device_description::NodeDescriptionBuilder;
-    use rumqttc::v5::mqttbytes::{v5::LastWill, QoS};
-    use rumqttc::v5::{AsyncClient, MqttOptions};
-    use tracing::info;
-
     use crate::connection::Connection;
     use crate::{connection, homie};
+    use rumqttc::v5::mqttbytes::v5::LastWill;
+    use rumqttc::v5::{AsyncClient, MqttOptions};
+    use std::sync::Arc;
 
     /// Read the value stored in the specified register.
     #[derive(clap::Parser)]
@@ -463,7 +459,8 @@ pub mod mqtt {
                 result = client_loop.poll() => {
                     result.expect("TODO");
                 }
-                () = device.step() => {
+                result = device.step() => {
+                    result.expect("TODO");
                 }
             }
         }

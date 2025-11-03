@@ -10,7 +10,7 @@ pub(crate) fn homie_enum_format<T: strum::VariantNames>() -> HomiePropertyFormat
     HomiePropertyFormat::Enum(T::VARIANTS.iter().copied().map(Into::into).collect())
 }
 
-pub(crate) trait PropertyValue {
+pub(crate) trait PropertyValue: Send + Sync {
     fn value(&self) -> String;
     fn target(&self) -> Option<String>;
 }
