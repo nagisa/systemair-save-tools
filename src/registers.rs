@@ -1023,7 +1023,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
             1033 => "Set point setting for RH demand control winter time",
             1034 => "Set point setting for RH demand control summer time",
             1035 => "Flag indicating if RH demand control is allowed",
-            1039 => "Actual seasson for Demand Control. 0=Summer, 1=Winter",
+            1039 => "Actual season for Demand Control. 0=Summer, 1=Winter",
             1041 => "Pband setting for CO2 demand control",
             1043 => "Set point setting for CO2 demand control",
             1044 => "Flag indicating if CO2 demand control is allowed",
@@ -1177,7 +1177,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
             1409 | 1419 | 1429 | 1439 => "SAF speed value for maximum fan speed",
             1410 | 1420 | 1430 | 1440 => "EAF speed value for maximum fan speed",
             1621 | 1623 | 1625 => "Remaining time",
-            2001 | 2054 => "Temperature setpoint for the supply airtemperature",
+            2001 | 2054 => "Temperature setpoint for the supply air temperature",
             2013 | 2053 => {
                 "Temperature set point for SATC, as calculated by RATC/EATC during cascade control"
             }
@@ -1291,7 +1291,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
                 "Flag indicating if DST is enabled. 0=Daylight saving time not enabled, 1=Daylight \
                  saving time enabled"
             }
-            6008 => "Indicaties the presentation of time in the HMI. 24H/12H",
+            6008 => "Indicates the presentation of time in the HMI. 24H/12H",
             6009 => "Monday (0)...Sunday (6)",
             6011 => "Now time in seconds. Lower 16 bits.",
             6012 => "Now time in seconds. Higher 16 bits.",
@@ -1385,7 +1385,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
             14101 => "Heater AO state.",
             14102 => "Heater DO state. 0=Output not active, 1=Output active",
             14103 => "Heat Exchanger AO state.",
-            14104 => "Heat Exchanger DO state. 0=Output notactive, 1=Output active",
+            14104 => "Heat Exchanger DO state. 0=Output not active, 1=Output active",
             14201 => "Cooler AO state.",
             14202 => "Cooler DO state. 0=Output not active, 1=Output active",
             14203 => "Extra controller AO state.",
