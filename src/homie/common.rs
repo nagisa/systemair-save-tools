@@ -38,43 +38,38 @@ impl PropertyValue for SimpleValue {
     }
 }
 
-pub(crate) struct BooleanValue<const MUTABLE: bool>(pub(crate) bool);
-impl<const MUTABLE: bool> PropertyDescription for BooleanValue<MUTABLE> {
+pub(crate) struct BooleanValue(pub(crate) bool);
+impl PropertyDescription for BooleanValue {
     fn description() -> HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(HomieDataType::Boolean)
-            .settable(MUTABLE)
-            .build()
+        PropertyDescriptionBuilder::new(HomieDataType::Boolean).build()
     }
 }
-impl<const MUTABLE: bool> TryFrom<Value> for BooleanValue<MUTABLE> {
+impl TryFrom<Value> for BooleanValue {
     type Error = ();
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         Ok(BooleanValue(value.into_inner() != 0))
     }
 }
-impl<const MUTABLE: bool> PropertyValue for BooleanValue<MUTABLE> {
+impl PropertyValue for BooleanValue {
     fn value(&self) -> String {
         self.0.to_string()
     }
 }
 
-pub(crate) struct UintValue<const MUTABLE: bool>(pub(crate) u16);
-impl<const MUTABLE: bool> TryFrom<Value> for UintValue<MUTABLE> {
+pub(crate) struct UintValue(pub(crate) u16);
+impl TryFrom<Value> for UintValue {
     type Error = ();
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         Ok(Self(value.into_inner()))
     }
 }
-impl<const MUTABLE: bool> PropertyValue for UintValue<MUTABLE> {
+impl PropertyValue for UintValue {
     fn value(&self) -> String {
         self.0.to_string()
     }
 }
-impl<const MUTABLE: bool> PropertyDescription for UintValue<MUTABLE> {
+impl PropertyDescription for UintValue {
     fn description() -> HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(HomieDataType::Integer)
-            .settable(true)
-            .build()
+        PropertyDescriptionBuilder::new(HomieDataType::Integer).build()
     }
 }
-

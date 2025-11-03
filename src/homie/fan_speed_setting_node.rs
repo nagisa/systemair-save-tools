@@ -38,47 +38,47 @@ static REGISTERS: [PropertyRegisterEntry; 71] = super::node::property_registers!
     (1177 is "pressure-guard-supply": AirflowLevel),
     (1178 is "pressure-guard-extract": AirflowLevel),
     (1274 is "regulation-type": RegulationType),
-    (1353 is "allow-manual-stop": BooleanValue<true>),
-    (1401 is "supply-percentage-for-minimum": UintValue<true>),
-    (1402 is "extract-percentage-for-minimum": UintValue<true>),
-    (1403 is "supply-percentage-for-low": UintValue<true>),
-    (1404 is "extract-percentage-for-low": UintValue<true>),
-    (1405 is "supply-percentage-for-normal": UintValue<true>),
-    (1406 is "extract-percentage-for-normal": UintValue<true>),
-    (1407 is "supply-percentage-for-high": UintValue<true>),
-    (1408 is "extract-percentage-for-high": UintValue<true>),
-    (1409 is "supply-percentage-for-maximum": UintValue<true>),
-    (1410 is "extract-percentage-for-maximum": UintValue<true>),
-    (1411 is "supply-rpm-for-minimum": UintValue<true>),
-    (1412 is "extract-rpm-for-minimum": UintValue<true>),
-    (1413 is "supply-rpm-for-low": UintValue<true>),
-    (1414 is "extract-rpm-for-low": UintValue<true>),
-    (1415 is "supply-rpm-for-normal": UintValue<true>),
-    (1416 is "extract-rpm-for-normal": UintValue<true>),
-    (1417 is "supply-rpm-for-high": UintValue<true>),
-    (1418 is "extract-rpm-for-high": UintValue<true>),
-    (1419 is "supply-rpm-for-maximum": UintValue<true>),
-    (1420 is "extract-rpm-for-maximum": UintValue<true>),
-    (1421 is "supply-pressure-for-minimum": UintValue<true>),
-    (1422 is "extract-pressure-for-minimum": UintValue<true>),
-    (1423 is "supply-pressure-for-low": UintValue<true>),
-    (1424 is "extract-pressure-for-low": UintValue<true>),
-    (1425 is "supply-pressure-for-normal": UintValue<true>),
-    (1426 is "extract-pressure-for-normal": UintValue<true>),
-    (1427 is "supply-pressure-for-high": UintValue<true>),
-    (1428 is "extract-pressure-for-high": UintValue<true>),
-    (1429 is "supply-pressure-for-maximum": UintValue<true>),
-    (1430 is "extract-pressure-for-maximum": UintValue<true>),
-    (1431 is "supply-flow-for-minimum": UintValue<true>),
-    (1432 is "extract-flow-for-minimum": UintValue<true>),
-    (1433 is "supply-flow-for-low": UintValue<true>),
-    (1434 is "extract-flow-for-low": UintValue<true>),
-    (1435 is "supply-flow-for-normal": UintValue<true>),
-    (1436 is "extract-flow-for-normal": UintValue<true>),
-    (1437 is "supply-flow-for-high": UintValue<true>),
-    (1438 is "extract-flow-for-high": UintValue<true>),
-    (1439 is "supply-flow-for-maximum": UintValue<true>),
-    (1440 is "extract-flow-for-maximum": UintValue<true>),
+    (1353 is "allow-manual-stop": BooleanValue),
+    (1401 is "supply-percentage-for-minimum": UintValue),
+    (1402 is "extract-percentage-for-minimum": UintValue),
+    (1403 is "supply-percentage-for-low": UintValue),
+    (1404 is "extract-percentage-for-low": UintValue),
+    (1405 is "supply-percentage-for-normal": UintValue),
+    (1406 is "extract-percentage-for-normal": UintValue),
+    (1407 is "supply-percentage-for-high": UintValue),
+    (1408 is "extract-percentage-for-high": UintValue),
+    (1409 is "supply-percentage-for-maximum": UintValue),
+    (1410 is "extract-percentage-for-maximum": UintValue),
+    (1411 is "supply-rpm-for-minimum": UintValue),
+    (1412 is "extract-rpm-for-minimum": UintValue),
+    (1413 is "supply-rpm-for-low": UintValue),
+    (1414 is "extract-rpm-for-low": UintValue),
+    (1415 is "supply-rpm-for-normal": UintValue),
+    (1416 is "extract-rpm-for-normal": UintValue),
+    (1417 is "supply-rpm-for-high": UintValue),
+    (1418 is "extract-rpm-for-high": UintValue),
+    (1419 is "supply-rpm-for-maximum": UintValue),
+    (1420 is "extract-rpm-for-maximum": UintValue),
+    (1421 is "supply-pressure-for-minimum": UintValue),
+    (1422 is "extract-pressure-for-minimum": UintValue),
+    (1423 is "supply-pressure-for-low": UintValue),
+    (1424 is "extract-pressure-for-low": UintValue),
+    (1425 is "supply-pressure-for-normal": UintValue),
+    (1426 is "extract-pressure-for-normal": UintValue),
+    (1427 is "supply-pressure-for-high": UintValue),
+    (1428 is "extract-pressure-for-high": UintValue),
+    (1429 is "supply-pressure-for-maximum": UintValue),
+    (1430 is "extract-pressure-for-maximum": UintValue),
+    (1431 is "supply-flow-for-minimum": UintValue),
+    (1432 is "extract-flow-for-minimum": UintValue),
+    (1433 is "supply-flow-for-low": UintValue),
+    (1434 is "extract-flow-for-low": UintValue),
+    (1435 is "supply-flow-for-normal": UintValue),
+    (1436 is "extract-flow-for-normal": UintValue),
+    (1437 is "supply-flow-for-high": UintValue),
+    (1438 is "extract-flow-for-high": UintValue),
+    (1439 is "supply-flow-for-maximum": UintValue),
+    (1440 is "extract-flow-for-maximum": UintValue),
     (4112 is "min-free-cooling-supply": AirflowLevel),
     (4113 is "min-free-cooling-extract": AirflowLevel),
     (5060 is "during-active-week-schedule": WeeklyScheduleLevel),
@@ -106,13 +106,14 @@ impl Node for FanSpeedSettingsNode {
     }
 
     fn description(&self) -> HomieNodeDescription {
-        let mut properties = BTreeMap::new();
-        for prop_register in &REGISTERS {
-            properties.insert(
-                prop_register.prop_id.clone(),
-                (prop_register.mk_description)(),
-            );
-        }
+        let properties = REGISTERS
+            .iter()
+            .map(|prop| {
+                let mut description = (prop.mk_description)();
+                description.settable = prop.register.mode().is_writable();
+                (prop.prop_id.clone(), description)
+            })
+            .collect::<BTreeMap<_, _>>();
         HomieNodeDescription {
             name: Some("fan speed settings".to_string()),
             r#type: None,
@@ -120,53 +121,21 @@ impl Node for FanSpeedSettingsNode {
         }
     }
 
-    fn on_register_value(&mut self, register: RegisterIndex, value: Value) {
-        let Ok(idx) = REGISTERS.binary_search_by_key(&register, |v| v.register) else {
-            return;
-        };
-        let old_value = self.device_values[idx];
+    fn registers(&self) -> &'static [PropertyRegisterEntry] {
+        &REGISTERS
+    }
+
+    fn record_register_value(&mut self, index: usize, value: Value) -> Option<Option<Value>> {
+        let old_value = self.device_values[index];
         if old_value == Some(value) {
-            return;
+            return None;
         }
-        self.device_values[idx] = Some(value);
-        let PropertyRegisterEntry {
-            prop_id,
-            from_value,
-            ..
-        } = &REGISTERS[idx];
-        let old_value = old_value.map(from_value);
-        let new_value = from_value(value);
-        let (tgt_changed, val_changed, new) = match (old_value, new_value) {
-            (None | Some(Err(_)) | Some(Ok(_)), Err(_)) => {
-                tracing::debug!(
-                    ?value,
-                    address = register.address(),
-                    ?prop_id,
-                    "could not parse value from device"
-                );
-                return;
-            }
-            (None | Some(Err(_)), Ok(new)) => (new.has_target(), true, new),
-            (Some(Ok(old)), Ok(new)) => (
-                new.has_target() && old.target() != new.target(),
-                old.value() != new.value(),
-                new,
-            ),
-        };
-        if tgt_changed {
-            let _ignore_no_receivers = self.sender.send(NodeEvent::TargetChanged {
-                node_id: self.node_id(),
-                prop_id: prop_id.clone(),
-                new: Arc::clone(&new) as _,
-            });
-        }
-        if val_changed {
-            let _ignore_no_receivers = self.sender.send(NodeEvent::PropertyChanged {
-                node_id: self.node_id(),
-                prop_id: prop_id.clone(),
-                new,
-            });
-        }
+        self.device_values[index] = Some(value);
+        return Some(old_value);
+    }
+
+    fn broadcast_node_event(&self, node_event: NodeEvent) {
+        let _ignore_no_receivers = self.sender.send(node_event);
     }
 
     fn node_events(&self) -> tokio::sync::broadcast::Receiver<NodeEvent> {

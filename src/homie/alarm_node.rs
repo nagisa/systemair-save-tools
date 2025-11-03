@@ -14,8 +14,8 @@
 //!
 //! TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
 
-use crate::homie::common::PropertyValue;
-use crate::homie::node::{Node, NodeEvent};
+use crate::homie::common::{PropertyDescription, PropertyValue};
+use crate::homie::node::{property_registers, Node, NodeEvent, PropertyRegisterEntry};
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
@@ -62,6 +62,17 @@ impl PropertyValue for AlarmValue {
     }
 }
 
+impl PropertyDescription for AlarmValue {
+    fn description() -> homie5::device_description::HomiePropertyDescription {
+        let alarm_property_format =
+            HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
+        PropertyDescriptionBuilder::new(HomieDataType::Enum)
+            .retained(true)
+            .format(alarm_property_format.clone())
+            .build()
+    }
+}
+
 impl AlarmValue {
     fn firing(&self) -> bool {
         matches!(self, AlarmValue::Firing | AlarmValue::Acknowledged)
@@ -71,54 +82,46 @@ impl AlarmValue {
     }
 }
 
-macro_rules! registers {
-    ($(($i: literal, $n: literal),)*) => {
-        const {
-            [$(((RegisterIndex::from_address($i).unwrap(), HomieID::new_const($n))),)*]
-        }
-    }
-}
-
-static ALARM_STATE_REGISTERS: [(RegisterIndex, HomieID); 35] = registers![
-    (15002, "supply-air-fan-control"),
-    (15009, "extract-air-fan-control"),
-    (15016, "frost-protection"),
-    (15023, "defrosting"),
-    (15030, "supply-air-fan-rpm"),
-    (15037, "extract-air-fan-rpm"),
-    (15058, "frost-protection-sensor"),
-    (15065, "outdoor-air-temperature"),
-    (15072, "supply-air-temperature"),
-    (15079, "room-air-temperature"),
-    (15086, "extract-air-temperature"),
-    (15093, "extra-controller-temperature"),
-    (15100, "eft"), // TODO: de-TLA this name
-    (15107, "overheat-protection-sensor"),
-    (15114, "emergency-thermostat"),
-    (15121, "rotor-guard"),
-    (15128, "bypass-damper-position-sensor"),
-    (15135, "secondary-air"),
-    (15142, "filter"),
-    (15149, "extra-controller"),
-    (15156, "external-stop"),
-    (15163, "relative-humidity"),
-    (15170, "co2"),
-    (15177, "low-supply-air-temperature"),
-    (15184, "byf"), // TODO: de-TLA this name: probably has something to do with bypass damper.
-    (15502, "manual-override-outputs"),
-    (15509, "pdm-room-humidity-sensor"), // PDM = pulse density modulation
-    (15516, "pdm-extract-room-temperature"),
-    (15523, "manual-fan-stop"),
-    (15530, "overheat-temperature"),
-    (15537, "fire"),
-    (15544, "filter-warning"),
-    (15901, "summary-type-a"),
-    (15902, "summary-type-b"),
-    (15903, "summary-type-c"),
+static REGISTERS: [PropertyRegisterEntry; 35] = property_registers![
+    (15002 is "supply-air-fan-control": AlarmValue),
+    (15009 is "extract-air-fan-control": AlarmValue),
+    (15016 is "frost-protection": AlarmValue),
+    (15023 is "defrosting": AlarmValue),
+    (15030 is "supply-air-fan-rpm": AlarmValue),
+    (15037 is "extract-air-fan-rpm": AlarmValue),
+    (15058 is "frost-protection-sensor": AlarmValue),
+    (15065 is "outdoor-air-temperature": AlarmValue),
+    (15072 is "supply-air-temperature": AlarmValue),
+    (15079 is "room-air-temperature": AlarmValue),
+    (15086 is "extract-air-temperature": AlarmValue),
+    (15093 is "extra-controller-temperature": AlarmValue),
+    (15100 is "eft": AlarmValue), // TODO: de-TLA this name
+    (15107 is "overheat-protection-sensor": AlarmValue),
+    (15114 is "emergency-thermostat": AlarmValue),
+    (15121 is "rotor-guard": AlarmValue),
+    (15128 is "bypass-damper-position-sensor": AlarmValue),
+    (15135 is "secondary-air": AlarmValue),
+    (15142 is "filter": AlarmValue),
+    (15149 is "extra-controller": AlarmValue),
+    (15156 is "external-stop": AlarmValue),
+    (15163 is "relative-humidity": AlarmValue),
+    (15170 is "co2": AlarmValue),
+    (15177 is "low-supply-air-temperature": AlarmValue),
+    (15184 is "byf": AlarmValue), // TODO: de-TLA this name: probably has something to do with bypass damper.
+    (15502 is "manual-override-outputs": AlarmValue),
+    (15509 is "pdm-room-humidity-sensor": AlarmValue), // PDM = pulse density modulation
+    (15516 is "pdm-extract-room-temperature": AlarmValue),
+    (15523 is "manual-fan-stop": AlarmValue),
+    (15530 is "overheat-temperature": AlarmValue),
+    (15537 is "fire": AlarmValue),
+    (15544 is "filter-warning": AlarmValue),
+    (15901 is "summary-type-a": AlarmValue),
+    (15902 is "summary-type-b": AlarmValue),
+    (15903 is "summary-type-c": AlarmValue),
 ];
 
 pub struct AlarmNode {
-    device_values: [Option<Value>; ALARM_STATE_REGISTERS.len()],
+    device_values: [Option<Value>; REGISTERS.len()],
     sender: Sender<NodeEvent>,
 }
 
@@ -126,7 +129,7 @@ impl AlarmNode {
     pub fn new() -> Self {
         let (sender, _) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
         Self {
-            device_values: [None; ALARM_STATE_REGISTERS.len()],
+            device_values: [None; REGISTERS.len()],
             sender: sender,
         }
     }
@@ -137,63 +140,18 @@ impl Node for AlarmNode {
         HomieID::new_const("alarm")
     }
     fn description(&self) -> HomieNodeDescription {
-        let alarm_property_format =
-            HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
-        let properties = ALARM_STATE_REGISTERS
+        let properties = REGISTERS
             .iter()
-            .map(|(register_index, property_id)| {
-                (
-                    property_id.clone(),
-                    PropertyDescriptionBuilder::new(HomieDataType::Enum)
-                        .settable(register_index.mode().is_writable())
-                        .retained(true)
-                        .format(alarm_property_format.clone())
-                        .build(),
-                )
+            .map(|prop| {
+                let mut description = (prop.mk_description)();
+                description.settable = prop.register.mode().is_writable();
+                (prop.prop_id.clone(), description)
             })
             .collect::<BTreeMap<_, _>>();
         HomieNodeDescription {
-            name: Some("Device alarm management".to_string()),
+            name: Some("device alarm management".to_string()),
             r#type: None,
             properties,
-        }
-    }
-
-    fn on_register_value(&mut self, register: RegisterIndex, value: Value) {
-        let Ok(idx) = ALARM_STATE_REGISTERS.binary_search_by_key(&register, |v| v.0) else {
-            return;
-        };
-        let prop_id = &ALARM_STATE_REGISTERS[idx].1;
-        let old_value = self.device_values[idx];
-        if old_value == Some(value) {
-            return;
-        }
-        self.device_values[idx] = Some(value);
-        let old_value = old_value.map(AlarmValue::try_from);
-        let new = AlarmValue::try_from(value);
-        let (tgt_changed, val_changed, new) = match (old_value, new) {
-            (None | Some(Err(_)) | Some(Ok(_)), Err(_)) => return,
-            (None | Some(Err(_)), Ok(new)) => (true, true, new),
-            (Some(Ok(old)), Ok(new)) => (
-                old.targetting_firing() != new.targetting_firing(),
-                old.firing() != new.firing(),
-                new,
-            ),
-        };
-        let new = Arc::new(new);
-        if tgt_changed {
-            let _ignore_no_receivers = self.sender.send(NodeEvent::TargetChanged {
-                node_id: self.node_id(),
-                prop_id: prop_id.clone(),
-                new: Arc::clone(&new) as _,
-            });
-        }
-        if val_changed {
-            let _ignore_no_receivers = self.sender.send(NodeEvent::PropertyChanged {
-                node_id: self.node_id(),
-                prop_id: prop_id.clone(),
-                new,
-            });
         }
     }
 
@@ -203,5 +161,22 @@ impl Node for AlarmNode {
 
     fn values_populated(&self) -> bool {
         self.device_values.iter().all(|v| v.is_some())
+    }
+
+    fn broadcast_node_event(&self, node_event: NodeEvent) {
+        let _ignore_no_receivers = self.sender.send(node_event);
+    }
+
+    fn registers(&self) -> &'static [super::node::PropertyRegisterEntry] {
+        &REGISTERS
+    }
+
+    fn record_register_value(&mut self, index: usize, value: Value) -> Option<Option<Value>> {
+        let old_value = self.device_values[index];
+        if old_value == Some(value) {
+            return None;
+        }
+        self.device_values[index] = Some(value);
+        return Some(old_value);
     }
 }
