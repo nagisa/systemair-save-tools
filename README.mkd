@@ -7,10 +7,14 @@
 
 </div>
 
+> [!WARNING]
+> This project is work in progress and the description below is a future-looking end goal for this
+> project. Not every feature described below is implemented yet. Any help is greatly appreciated!
+
 This package provides a collection of tools to operate [Systemair SAVE air heat recovery
 units][mfct]. The tools range from as simple as printing the documented and undocumented Modbus
 registers known to this tool, to reading and writing those registers, to exposing the control of
-the unit over MQTT as a device adhering to the [Homie
+the unit over MQTT (a-la `systemair2mqtt` style tool) as a device adhering to the [Homie
 convention](https://homieiot.github.io/specification/). The MQTT functionality makes it much more
 straightforward to expose the air handling unit for integration with home automation systems such
 as OpenHAB, Home Assistant or NodeRED.

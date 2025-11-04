@@ -487,8 +487,7 @@ pub mod write {
                     kind: ResponseKind::SetHolding { value },
                     ..
                 }) => {
-                    // IAM seems to be returning garbage in `value` here? Maybe even a memory read
-                    // primitive?
+                    // IAM seems to be returning garbage in `value` here...
                     tracing::info!(address, value, "register set")
                 }
                 Some(Response { kind: _, .. }) => {
@@ -619,7 +618,7 @@ pub mod mqtt {
                     match Command::try_from_mqtt_command(msg) {
                         Ok(cmd) => command_tx.send(cmd).expect("TODO"),
                         Err(unexpected) => {
-                            tracing::info!(?unexpected, "unexpected mqtt message received")
+                            tracing::info!(?unexpected, "unexpected mqtt command received")
                         }
                     }
                 }
