@@ -19,6 +19,7 @@ impl Request {
     pub fn expected_response_length(&self) -> u16 {
         let bytes_total = match self.operation {
             Operation::GetHoldings { address: _, count } => u32::from(count) * 2,
+            Operation::SetHolding { .. } => 2,
         };
         let rtu_blocks = (bytes_total + 0xFE) / 0xFF;
         // 1 byte no padding, 2 bytes crc, 2 bytes address and function.
@@ -30,6 +31,7 @@ impl Request {
 #[derive(Debug, Clone, Copy)]
 pub enum Operation {
     GetHoldings { address: u16, count: u16 },
+    SetHolding { address: u16, value: u16 },
 }
 
 #[derive(Debug)]
@@ -44,6 +46,7 @@ impl Response {
         match &self.kind {
             ResponseKind::ErrorCode(c) => Some(*c),
             ResponseKind::GetHoldings { values: _ } => None,
+            ResponseKind::SetHolding { value: _ } => None,
         }
     }
 
@@ -56,6 +59,7 @@ impl Response {
 pub enum ResponseKind {
     ErrorCode(u8),
     GetHoldings { values: Vec<u8> },
+    SetHolding { value: u16 },
 }
 
 pub trait Codec:
@@ -78,6 +82,12 @@ impl Encoder<&Request> for ModbusTCPCodec {
                 dst.extend(&[0, 0, 0, 0, req.device_id, 3]);
                 dst.extend((address - 1).to_be_bytes());
                 dst.extend(count.to_be_bytes());
+            }
+            Operation::SetHolding { address, value } => {
+                dst.extend(req.transaction_id.to_be_bytes());
+                dst.extend(&[0, 0, 0, 0, req.device_id, 6]);
+                dst.extend((address - 1).to_be_bytes());
+                dst.extend(value.to_be_bytes());
             }
         };
         trace!(message="sending encoded", buffer=?dst);
@@ -115,7 +125,7 @@ impl Decoder for ModbusTCPCodec {
             let Some((data, _)) = remainder.split_at_checked(required_length.into()) else {
                 return Ok(None);
             };
-            let [device_id, function_code, code, response @ ..] = data else {
+            let [device_id, function_code, code, ..] = data else {
                 src.advance(1);
                 continue;
             };
@@ -136,16 +146,23 @@ impl Decoder for ModbusTCPCodec {
                 //
                 // This is just one of the ways in which SystemAIR Modbus implementation is special
                 // such that using off-shelf parsers doesn't work well.
-                let values = response.to_vec();
-                src.advance(usize::from(required_length) + 6);
-                return Ok(Some(Response {
+                let result = Ok(Some(Response {
                     transaction_id,
                     device_id,
                     kind: match function_code {
-                        3 => ResponseKind::GetHoldings { values },
+                        3 => {
+                            let [_, _, _, values@..] = data else { unreachable!() };
+                            ResponseKind::GetHoldings { values: values.to_vec() }
+                        }
+                        6 => {
+                            let [_, _, _, _, a, b] = data else { unreachable!() };
+                            ResponseKind::SetHolding { value: u16::from_be_bytes([*a, *b]) }
+                        }
                         _ => continue,
                     },
                 }));
+                src.advance(usize::from(required_length) + 6);
+                return result;
             }
         }
     }

@@ -141,6 +141,7 @@ pub mod read {
     use futures::{StreamExt as _, TryStreamExt};
     use std::collections::VecDeque;
     use std::fmt::Write as _;
+    use std::future::Future;
     use std::num::ParseIntError;
 
     #[derive(clap::ValueEnum, Clone)]
@@ -155,13 +156,13 @@ pub mod read {
     #[derive(clap::Parser)]
     pub struct Args {
         #[arg(required = true)]
-        registers: Vec<String>,
+        pub(super) registers: Vec<String>,
         #[arg(long, short = 'i', default_value = "1")]
-        device_id: u8,
+        pub(super) device_id: u8,
         #[clap(flatten)]
-        connection: connection::Args,
+        pub(super) connection: connection::Args,
         #[clap(flatten)]
-        output: output::Args,
+        pub(super) output: output::Args,
     }
 
     #[derive(thiserror::Error, Debug)]
@@ -232,8 +233,27 @@ pub mod read {
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn run(args: Args) -> Result<(), Error> {
-        let register_indices = args
-            .registers
+        let Args {
+            registers,
+            device_id,
+            connection,
+            output,
+        } = args;
+        run_with_connection(&registers, device_id, output, async move {
+            Connection::new(connection)
+                .await
+                .map_err(Error::Communicate)
+        })
+        .await
+    }
+
+    pub async fn run_with_connection(
+        registers: &[String],
+        device_id: u8,
+        output: output::Args,
+        connection: impl Future<Output = Result<Connection, Error>>,
+    ) -> Result<(), Error> {
+        let register_indices = registers
             .iter()
             .map(|register| {
                 if let Ok(address) = register.parse::<u16>() {
@@ -265,11 +285,10 @@ pub mod read {
                 Err(Error::RegisterNotFound(register.clone()))
             })
             .collect::<Result<VecDeque<_>, _>>()?;
-        let mut output = args.output.to_output().map_err(Error::CreateOutput)?;
+        let mut output = output.to_output().map_err(Error::CreateOutput)?;
         let heads = vec!["Tx ID", "Address", "Name", "Response"];
         output.table_headers(heads).map_err(Error::WriteOutput)?;
-
-        let connection = Connection::new(args.connection).await.unwrap();
+        let connection = connection.await?;
         let mut stream = futures::stream::iter(register_indices.iter())
             .map(|read_request| {
                 let connection = &connection;
@@ -278,7 +297,7 @@ pub mod read {
                     loop {
                         let outcome = connection
                             .send(Request {
-                                device_id: 1,
+                                device_id,
                                 transaction_id,
                                 operation: read_request.to_operation(),
                             })
@@ -330,6 +349,9 @@ pub mod read {
                                     }
                                     buf
                                 }
+                                ResponseKind::SetHolding { .. } => {
+                                    "SetHolding response?".to_string()
+                                }
                             };
                             vec![
                                 response.transaction_id.to_string(),
@@ -349,6 +371,7 @@ pub mod read {
                                     let range = value_offset..(value_offset + dt.bytes());
                                     (Some(dt.from_bytes(&values[range]).collect()), None)
                                 }
+                                ResponseKind::SetHolding { .. } => (None, None),
                             };
                             OutputSchema {
                                 address,
@@ -362,6 +385,132 @@ pub mod read {
             }
         }
         output.commit().map_err(Error::CommitOutput)
+    }
+}
+
+pub mod write {
+    use std::sync::Arc;
+
+    use crate::{
+        commands::registers,
+        connection::{self, Connection},
+        modbus::{Operation, Request, Response, ResponseKind},
+        registers::{ParseValueError, RegisterIndex},
+    };
+
+    /// Write the values into specified registers.
+    #[derive(clap::Parser)]
+    pub struct Args {
+        #[arg(required = true)]
+        registers: Vec<String>,
+        #[arg(long, short = 'i', default_value = "1")]
+        device_id: u8,
+        #[arg(long)]
+        no_read_back: bool,
+        #[clap(flatten)]
+        output: crate::output::Args,
+        #[clap(flatten)]
+        connection: connection::Args,
+    }
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum Error {
+        #[error("could not read back the written registers")]
+        Readback(#[source] super::read::Error),
+        #[error("could not parse {0} into a register description and value to write (expected format `REG=VAL`)")]
+        RegisterMalformed(String),
+        #[error("register address {0} is not known")]
+        RegisterAddressUnknown(u16),
+        #[error("register {0} is not known")]
+        RegisterNotFound(String),
+        #[error("could not parse value {0} for register {1}")]
+        ParseValue(String, String, #[source] ParseValueError),
+        #[error("communication with the device failed")]
+        Communicate(#[source] crate::connection::Error),
+    }
+
+    #[tokio::main(flavor = "current_thread")]
+    pub async fn run(args: Args) -> Result<(), Error> {
+        let mut readback_registers = vec![];
+        let mut write_ops = vec![];
+        for register in args.registers {
+            let Some((register, value)) = register.split_once("=") else {
+                return Err(Error::RegisterMalformed(register));
+            };
+            readback_registers.push(register.to_string());
+            let register_index = if let Ok(address) = register.parse::<u16>() {
+                let Some(i) = RegisterIndex::from_address(address) else {
+                    return Err(Error::RegisterAddressUnknown(address));
+                };
+                i
+            } else if let Some(i) = RegisterIndex::from_name(register) {
+                i
+            } else {
+                return Err(Error::RegisterNotFound(register.to_string()));
+            };
+            if !register_index.mode().is_writable() {
+                tracing::warn!(register, "not writable, will try writing anyway…!")
+            }
+            let value = register_index
+                .data_type()
+                .parse_string(value)
+                .map_err(|e| Error::ParseValue(value.into(), register.into(), e))?;
+            write_ops.push((register_index, value));
+        }
+        let connection = Connection::new(args.connection.clone()).await.unwrap();
+        for (register, val) in write_ops {
+            let transaction_id = connection.new_transaction_id();
+            let outcome = connection
+                .send(Request {
+                    device_id: 1,
+                    transaction_id,
+                    operation: Operation::SetHolding {
+                        address: register.address(),
+                        value: val.into_inner(),
+                    },
+                })
+                .await
+                .map_err(Error::Communicate)?;
+            let address = register.address();
+            match outcome {
+                Some(Response {
+                    kind: ResponseKind::ErrorCode(c),
+                    ..
+                }) => {
+                    tracing::warn!(
+                        address,
+                        exception = c,
+                        "device responded with an exception code to a set command"
+                    )
+                }
+                Some(Response {
+                    kind: ResponseKind::SetHolding { value },
+                    ..
+                }) => {
+                    // IAM seems to be returning garbage in `value` here? Maybe even a memory read
+                    // primitive?
+                    tracing::info!(address, value, "register set")
+                }
+                Some(Response { kind: _, .. }) => {
+                    tracing::warn!(address, "unexpected response to a set command")
+                }
+                None => {
+                    tracing::warn!(address, "no response to set register command")
+                }
+            }
+        }
+
+        if !args.no_read_back {
+            super::read::run_with_connection(
+                &readback_registers,
+                args.device_id,
+                args.output,
+                async move { Ok(connection) },
+            )
+            .await
+            .map_err(Error::Readback)?;
+        }
+        Ok(())
     }
 }
 

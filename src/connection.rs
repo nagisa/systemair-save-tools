@@ -81,7 +81,7 @@ impl ResponseTracker {
     }
 }
 
-#[derive(clap::Parser)]
+#[derive(clap::Parser, Clone)]
 #[group(id = "connection::Args")]
 pub struct Args {
     #[clap(flatten)]
@@ -108,7 +108,7 @@ pub struct Args {
     tcp_send_delay: humantime::Duration,
 }
 
-#[derive(clap::Parser)]
+#[derive(clap::Parser, Clone)]
 #[group(required = true)]
 pub struct ConnectionGroup {
     /// Connect to the SystemAIR device over Modbus TCP (usually available via the IAM module).

@@ -4,6 +4,18 @@ pub struct DataType {
     signed: bool,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ParseValueError {
+    #[error("could not parse integer value")]
+    Integer(#[source] std::num::ParseIntError),
+    #[error("could not parse floating point value")]
+    Float(#[source] std::num::ParseFloatError),
+    #[error("{0} has too much precision that cannot be represented")]
+    FloatTooPrecise(f32),
+    #[error("could not be converted to a register value")]
+    OutOfRange(#[source] std::num::TryFromIntError),
+}
+
 impl DataType {
     // Convenience aliases for nicely tabulated `for_each_register` macro definition below.
     pub const U16: Self = Self {
@@ -34,6 +46,31 @@ impl DataType {
                 Self::SPH => Value::SpecificHumidity(u16::from_be_bytes(*v)),
                 _ => panic!("malformed DataType"),
             })
+        })
+    }
+
+    pub fn parse_string(self, string: &str) -> Result<Value, ParseValueError> {
+        fn checked_float_convert<T: TryFrom<i64, Error = std::num::TryFromIntError>>(
+            scale: f32,
+            inp: &str,
+        ) -> Result<T, ParseValueError> {
+            let float = inp.parse::<f32>().map_err(ParseValueError::Float)?;
+            let scaled = float * scale;
+            if scaled.fract() != 0.0 {
+                return Err(ParseValueError::FloatTooPrecise(float));
+            }
+            (scaled as i64)
+                .try_into()
+                .map_err(ParseValueError::OutOfRange)
+        }
+        Ok(match self {
+            Self::I16 => Value::I16(string.parse().map_err(ParseValueError::Integer)?),
+            Self::U16 => Value::U16(string.parse().map_err(ParseValueError::Integer)?),
+            Self::CEL => Value::Celsius(checked_float_convert(self.scale() as f32, string)?),
+            Self::SPH => {
+                Value::SpecificHumidity(checked_float_convert(self.scale() as f32, string)?)
+            }
+            _ => panic!("malformed DataType"),
         })
     }
 
@@ -166,10 +203,14 @@ impl RegisterIndex {
         const fn str_eq(a: &str, b: &str) -> bool {
             let (ab, bb) = (a.as_bytes(), b.as_bytes());
             let alen = ab.len();
-            if alen != bb.len() { return false; }
+            if alen != bb.len() {
+                return false;
+            }
             let mut i = 0;
             while i < alen {
-                if ab[i] != bb[i] { return false; }
+                if ab[i] != bb[i] {
+                    return false;
+                }
                 i += 1;
             }
             true

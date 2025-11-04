@@ -7,6 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _
 enum Commands {
     Registers(commands::registers::Args),
     Read(commands::read::Args),
+    Write(commands::write::Args),
     Mqtt(commands::mqtt::Args),
 }
 
@@ -41,6 +42,7 @@ fn main() {
     match Commands::parse() {
         Commands::Registers(args) => end(commands::registers::run(args)),
         Commands::Read(args) => end(commands::read::run(args)),
+        Commands::Write(args) => end(commands::write::run(args)),
         Commands::Mqtt(args) => end(commands::mqtt::run(args)),
     }
 }

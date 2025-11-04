@@ -352,34 +352,3 @@ impl Command {
         }
     }
 }
-
-enum PropertyEventKind {
-    /// Value changed.
-    PropertyValue(Box<dyn PropertyValue>),
-    /// There was an error reading the value behind this property.
-    ReadError(Arc<ReadStreamError>),
-    /// There was a server exception indicated in the response.
-    ServerException(u8),
-}
-
-impl PropertyEventKind {
-    fn from_holdings_response<V: PropertyValue + 'static>(
-        response: &Result<Response, Arc<ReadStreamError>>,
-        holdings: impl FnOnce(&[u8]) -> V,
-    ) -> Self {
-        match response {
-            Err(e) => return PropertyEventKind::ReadError(Arc::clone(e)),
-            Ok(Response {
-                kind: ResponseKind::ErrorCode(e),
-                ..
-            }) => return PropertyEventKind::ServerException(*e),
-            Ok(Response {
-                kind: ResponseKind::GetHoldings { values },
-                ..
-            }) => {
-                let value = holdings(&values);
-                return PropertyEventKind::PropertyValue(Box::new(value));
-            }
-        }
-    }
-}

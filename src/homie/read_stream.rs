@@ -205,6 +205,10 @@ fn modbus_stream_register_changes(
                         let value = extract_value(idx, register, values)?;
                         RegisterEventKind::Value(value)
                     }
+                    Ok(Response {
+                        kind: ResponseKind::SetHolding { .. },
+                        ..
+                    }) => return None,
                 };
                 Some(RegisterEvent { register, kind })
             });
