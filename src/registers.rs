@@ -199,6 +199,14 @@ impl RegisterIndex {
     pub const fn mode(&self) -> Mode {
         MODES[self.0 as usize]
     }
+
+    pub const fn minimum_value(&self) -> Option<Value> {
+        MINIMUM_VALUES[self.0 as usize]
+    }
+
+    pub const fn maximum_value(&self) -> Option<Value> {
+        MAXIMUM_VALUES[self.0 as usize]
+    }
 }
 
 macro_rules! for_each_register {
@@ -273,14 +281,15 @@ macro_rules! for_each_register {
             1227: U16, R_, "SPEED_PRESSURE_GUARD_SAF";
             1228: U16, R_, "SPEED_PRESSURE_GUARD_EAF";
             1251: U16, RW, "FAN_OUTDOOR_COMP_TYPE", min = 0, max = 1;
-            1252: CEL, RW, "FAN_OUTDOOR_COMP_MAX_VALUE", min = 0, max = 50;
+            1252: U16, RW, "FAN_OUTDOOR_COMP_MAX_VALUE", min = 0, max = 50;
+            // Not used since MB FW 1.6.0
             1253: CEL, RW, "FAN_OUTDOOR_COMP_STOP_T_WINTER", min = -300, max = 0;
             1254: CEL, RW, "FAN_OUTDOOR_COMP_MAX_TEMP", min = -300, max = 0;
             1255: U16, R_, "FAN_OUTDOOR_COMP_RESULT", min = 0, max = 100;
             1256: CEL, RW, "FAN_OUTDOOR_COMP_START_T_WINTER", min = -300, max = 0;
             1257: CEL, RW, "FAN_OUTDOOR_COMP_START_T_SUMMER", min = 150, max = 300;
             1258: CEL, RW, "FAN_OUTDOOR_COMP_STOP_T_SUMMER", min = 150, max = 400;
-            1259: CEL, RW, "FAN_OUTDOOR_COMP_VALUE_SUMMER", min = 0, max = 50;
+            1259: U16, RW, "FAN_OUTDOOR_COMP_VALUE_SUMMER", min = 0, max = 50;
             1274: U16, RW, "FAN_REGULATION_UNIT", min = 0, max = 4;
             1301: U16, R_, "FAN_LEVEL_SAF_MIN";
             1302: U16, R_, "FAN_LEVEL_EAF_MIN";
@@ -1108,7 +1117,8 @@ pub static DESCRIPTIONS: &[&str] = &const {
             1251 => "Compensate only SF or both SF and EF. 0=SAF, 1=SAF/EAF",
             1252 => "Compensation value at lowest temperature.",
             1253 => {
-                "Temperature at which compensation reaches maximum value during the winter period."
+                "Temperature at which compensation reaches maximum value during the winter period. \
+                Not used since MB FW 1.6.0"
             }
             1254 => "Temperature at which highest compensation is applied.",
             1255 => "Current outdoor compensation value",

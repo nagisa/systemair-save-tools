@@ -1,7 +1,7 @@
 //! Exposes fan speed settings as a homie node.
 
 use crate::homie::common::{
-    homie_enum, BooleanValue, PropertyDescription, PropertyValue, UintValue,
+    adjust_for_register, homie_enum, BooleanValue, PropertyDescription, PropertyValue, UintValue,
 };
 use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
 use crate::registers::{RegisterIndex, Value};
@@ -91,8 +91,7 @@ pub struct FanSpeedSettingsNode {
 }
 
 impl FanSpeedSettingsNode {
-    pub(crate) fn new() -> Self {
-        let (sender, _) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
+    pub(crate) fn new(sender: Sender<NodeEvent>) -> Self {
         Self {
             device_values: [None; _],
             sender,
@@ -110,7 +109,7 @@ impl Node for FanSpeedSettingsNode {
             .iter()
             .map(|prop| {
                 let mut description = (prop.mk_description)();
-                description.settable = prop.register.mode().is_writable();
+                adjust_for_register(&mut description, prop.register);
                 (prop.prop_id.clone(), description)
             })
             .collect::<BTreeMap<_, _>>();
@@ -138,17 +137,15 @@ impl Node for FanSpeedSettingsNode {
         let _ignore_no_receivers = self.sender.send(node_event);
     }
 
-    fn node_events(&self) -> tokio::sync::broadcast::Receiver<NodeEvent> {
-        self.sender.subscribe()
-    }
-
     fn values_populated(&self) -> bool {
         self.device_values.iter().all(|v| v.is_some())
     }
 }
 
 #[repr(u16)]
-#[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[derive(
+    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
+)]
 #[strum(serialize_all = "kebab-case")]
 enum AirflowLevel {
     Off = 0,
@@ -165,7 +162,7 @@ impl PropertyValue for AirflowLevel {
 }
 impl PropertyDescription for AirflowLevel {
     fn description() -> HomiePropertyDescription {
-        homie_enum::<AirflowLevel>().settable(true).build()
+        homie_enum::<Self>().build()
     }
 }
 impl TryFrom<Value> for AirflowLevel {
@@ -176,7 +173,9 @@ impl TryFrom<Value> for AirflowLevel {
 }
 
 #[repr(u16)]
-#[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[derive(
+    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
+)]
 #[strum(serialize_all = "kebab-case")]
 enum WeeklyScheduleLevel {
     Off = 0,
@@ -193,7 +192,7 @@ impl PropertyValue for WeeklyScheduleLevel {
 }
 impl PropertyDescription for WeeklyScheduleLevel {
     fn description() -> HomiePropertyDescription {
-        homie_enum::<WeeklyScheduleLevel>().settable(true).build()
+        homie_enum::<Self>().build()
     }
 }
 impl TryFrom<Value> for WeeklyScheduleLevel {
@@ -204,7 +203,9 @@ impl TryFrom<Value> for WeeklyScheduleLevel {
 }
 
 #[repr(u16)]
-#[derive(Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr)]
+#[derive(
+    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
+)]
 #[strum(serialize_all = "kebab-case")]
 enum RegulationType {
     Manual = 0,
@@ -226,6 +227,6 @@ impl PropertyValue for RegulationType {
 }
 impl PropertyDescription for RegulationType {
     fn description() -> HomiePropertyDescription {
-        homie_enum::<RegulationType>().settable(true).build()
+        homie_enum::<Self>().build()
     }
 }

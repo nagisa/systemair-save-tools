@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 
-#[derive(Copy, Clone, PartialEq, Eq, strum::FromRepr)]
+#[derive(Copy, Clone, PartialEq, Eq, strum::FromRepr, strum::EnumString)]
 #[repr(u8)]
 pub enum AlarmValue {
     Clear = 0,
@@ -126,11 +126,10 @@ pub struct AlarmNode {
 }
 
 impl AlarmNode {
-    pub fn new() -> Self {
-        let (sender, _) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
+    pub fn new(sender: Sender<NodeEvent>) -> Self {
         Self {
             device_values: [None; REGISTERS.len()],
-            sender: sender,
+            sender,
         }
     }
 }
@@ -153,10 +152,6 @@ impl Node for AlarmNode {
             r#type: None,
             properties,
         }
-    }
-
-    fn node_events(&self) -> tokio::sync::broadcast::Receiver<NodeEvent> {
-        self.sender.subscribe()
     }
 
     fn values_populated(&self) -> bool {

@@ -1,7 +1,7 @@
 mod alarm_node;
 mod common;
+mod compensation_node;
 mod node;
-// mod compensation_node;
 // mod demand_control_node;
 mod fan_speed_setting_node;
 mod read_stream;
@@ -11,17 +11,16 @@ use crate::homie::common::PropertyValue;
 use crate::homie::node::{Node, NodeEvent};
 use crate::homie::read_stream::RegisterEvent;
 use crate::modbus::{Response, ResponseKind};
-use futures::stream::SelectAll;
-use futures::{Stream, StreamExt as _};
+use futures::StreamExt as _;
 use homie5::client::{Publish, QoS, Subscription};
 use homie5::device_description::HomieDeviceDescription;
-use homie5::{Homie5DeviceProtocol, HomieDeviceStatus, HomieID};
+use homie5::{Homie5DeviceProtocol, HomieDeviceStatus, HomieID, PropertyRef};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::task::AbortOnDropHandle;
 
 pub struct SystemAirDevice {
@@ -31,9 +30,11 @@ pub struct SystemAirDevice {
     description: HomieDeviceDescription,
     #[allow(unused)] // exists for its drop handler
     device_read_task: AbortOnDropHandle<()>,
-    read_events: Receiver<RegisterEvent>,
     nodes: BTreeMap<HomieID, Box<dyn Node>>,
-    node_event_stream: SelectAll<BroadcastStream<NodeEvent>>,
+    modbus: Arc<Connection>,
+    read_events: Receiver<RegisterEvent>,
+    node_events: Receiver<NodeEvent>,
+    commands: mpsc::UnboundedReceiver<Command>,
 }
 
 impl SystemAirDevice {
@@ -41,13 +42,18 @@ impl SystemAirDevice {
         mqtt: rumqttc::v5::AsyncClient,
         protocol: Homie5DeviceProtocol,
         modbus: Arc<Connection>,
+        commands: mpsc::UnboundedReceiver<Command>,
     ) -> Self {
+        let (sender, node_events) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
         let nodes = [
-            Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
+            Box::new(alarm_node::AlarmNode::new(sender.clone())) as Box<dyn Node>,
             // Box::new(demand_control_node::DemandControlNode) as _,
-            Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new()) as _,
-            // Box::new(compensation_node::CompensationNode) as _,
+            Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new(
+                sender.clone(),
+            )) as _,
+            Box::new(compensation_node::CompensationNode::new(sender.clone())) as _,
         ];
+        drop(sender);
         let mut description =
             homie5::device_description::DeviceDescriptionBuilder::new().name("SystemAIR SAVE");
         for node in &nodes {
@@ -56,8 +62,8 @@ impl SystemAirDevice {
         let description = description.build();
         let (read_sender, read_events) =
             tokio::sync::broadcast::channel::<read_stream::RegisterEvent>(1024);
+        let mut read_stream = read_stream::read_device(Arc::clone(&modbus));
         let device_read_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-            let mut read_stream = read_stream::read_device(modbus);
             loop {
                 let register_event = match read_stream.next().await {
                     None => return,
@@ -74,8 +80,6 @@ impl SystemAirDevice {
             }
         }));
         // FIXME: "simply" create senders for each individual node with the same backing buffer??
-        let node_event_stream =
-            SelectAll::from_iter(nodes.iter().map(|n| BroadcastStream::new(n.node_events())));
         let nodes = nodes.into_iter().map(|v| (v.node_id(), v)).collect();
         Self {
             mqtt,
@@ -83,9 +87,11 @@ impl SystemAirDevice {
             protocol,
             description,
             device_read_task,
-            node_event_stream,
+            node_events,
             read_events,
+            commands,
             nodes,
+            modbus,
         }
     }
 
@@ -207,20 +213,46 @@ impl SystemAirDevice {
         Ok(())
     }
 
+    async fn handle_command(&mut self, command: Command) -> Result<(), ()> {
+        match command {
+            Command::Set { property, value } => {
+                if property.device_id() != self.protocol.device_ref().device_id() {
+                    return Err(()); // TODO
+                }
+                let Some(node) = self.nodes.get(property.node_id()) else {
+                    return Err(()); // TODO
+                };
+                // TODO: should probably be moved to `trait Node`
+                let Some((idx, prop)) = node.property_by_name(property.prop_id()) else {
+                    return Err(()); // TODO
+                };
+                let value = (prop.from_str)(&value).expect("TODO");
+                let transaction_id = self.modbus.new_transaction_id();
+                todo!();
+                // let operation = crate::modbus::Operation::
+                // self.modbus.send(crate::modbus::Request { device_id: 1, transaction_id, operation: () }
+            }
+            Command::Reload { property } => todo!(),
+        }
+        Ok(())
+    }
+
     pub async fn step(&mut self) -> Result<(), ()> {
         loop {
             tokio::select! {
-                node_event = self.node_event_stream.next() => {
-                    let node_event = match node_event {
+                node_event = self.node_events.recv() => {
+                    let event = match node_event {
+                        Ok(event) => event,
                         // report an error upstream so everything cleans up and finishes execution
-                        None => todo!(),
-                        Some(Ok(event)) => event,
-                        Some(Err(BroadcastStreamRecvError::Lagged(messages_lost))) => {
-                            tracing::warn!(messages_lost, "node event handler fell behind");
+                        Err(RecvError::Closed) => {
+                            todo!();
+                        }
+                        Err(RecvError::Lagged(count)) => {
+                            tracing::warn!(count, "node event handler lagged");
                             continue;
                         }
                     };
-                    return self.handle_node_event(node_event).await;
+                    return self.handle_node_event(event).await;
                 },
                 read_event = self.read_events.recv() => {
                     let event = match read_event {
@@ -235,6 +267,10 @@ impl SystemAirDevice {
                         }
                     };
                     return self.handle_read_event(event).await;
+                },
+                command = self.commands.recv() => {
+                    let Some(command) = command else { todo!() };
+                    return self.handle_command(command).await;
                 },
             }
         }
@@ -284,6 +320,37 @@ pub fn convert_qos(homie: QoS) -> rumqttc::v5::mqttbytes::QoS {
 enum ReadStreamError {
     #[error("could not send a modbus request")]
     Send(#[source] crate::connection::Error),
+}
+
+pub(crate) enum Command {
+    Set {
+        property: PropertyRef,
+        value: String,
+    },
+    Reload {
+        property: PropertyRef,
+    },
+}
+
+impl Command {
+    // FIXME: maybe reuse this for general service task queue (e.g. not just for mqtt set
+    // operations, but also e.g. "refresh this register NOW" ones which we might want to do after
+    // we do a set?)
+    pub(crate) fn try_from_mqtt_command(
+        msg: rumqttc::v5::mqttbytes::v5::Publish,
+    ) -> Result<Self, rumqttc::v5::mqttbytes::v5::Publish> {
+        let topic = str::from_utf8(&msg.topic).expect("TODO");
+        match homie5::parse_mqtt_message(topic, &msg.payload) {
+            Ok(homie5::Homie5Message::PropertySet {
+                property,
+                set_value,
+            }) => Ok(Self::Set {
+                property: property,
+                value: set_value,
+            }),
+            _ => Err(msg),
+        }
+    }
 }
 
 enum PropertyEventKind {

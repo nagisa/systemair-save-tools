@@ -367,12 +367,14 @@ pub mod read {
 
 pub mod mqtt {
     use crate::connection::Connection;
+    use crate::homie::Command;
     use crate::{connection, homie};
-    use rumqttc::v5::mqttbytes::v5::LastWill;
-    use rumqttc::v5::{AsyncClient, MqttOptions};
+    use rumqttc::v5::mqttbytes::v5::{LastWill, Publish};
+    use rumqttc::v5::{AsyncClient, Incoming, MqttOptions};
     use std::sync::Arc;
+    use tokio::sync::mpsc;
 
-    /// Read the value stored in the specified register.
+    /// Start a SystemAIR to MQTT proxy which exposes a homie interface to the HVAC device
     #[derive(clap::Parser)]
     pub struct Args {
         #[clap(flatten)]
@@ -437,7 +439,8 @@ pub mod mqtt {
             None,
         ));
         let (client, mut client_loop) = AsyncClient::new(mqtt_options, 100);
-        let mut device = homie::SystemAirDevice::new(client, protocol, connection);
+        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let mut device = homie::SystemAirDevice::new(client, protocol, connection, command_rx);
 
         {
             let mut publish_future = std::pin::pin!(device.publish_device());
@@ -454,16 +457,28 @@ pub mod mqtt {
             }
         }
         loop {
-            tokio::select! {
+            let mqtt_event = tokio::select! {
                 biased;
-                result = client_loop.poll() => {
-                    result.expect("TODO");
-                }
+                result = client_loop.poll() => result.expect("TODO"),
                 result = device.step() => {
                     result.expect("TODO");
+                    continue;
                 }
+            };
+            match mqtt_event {
+                rumqttc::v5::Event::Incoming(Incoming::Publish(msg)) => {
+                    match Command::try_from_mqtt_command(msg) {
+                        Ok(cmd) => command_tx.send(cmd).expect("TODO"),
+                        Err(unexpected) => {
+                            tracing::info!(?unexpected, "unexpected mqtt message received")
+                        }
+                    }
+                }
+                rumqttc::v5::Event::Incoming(event) => {
+                    tracing::debug!(?event, "incoming mqtt event not handled");
+                }
+                rumqttc::v5::Event::Outgoing(_) => {}
             }
         }
-        Ok(())
     }
 }

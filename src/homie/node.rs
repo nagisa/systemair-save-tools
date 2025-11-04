@@ -67,7 +67,10 @@ pub trait Node {
         }
     }
 
-    fn node_events(&self) -> Receiver<NodeEvent>;
+    fn property_by_name(&self, prop_id: &HomieID) -> Option<(usize, &PropertyRegisterEntry)> {
+        let registers = self.registers();
+        registers.iter().enumerate().find(|(_, v)| &v.prop_id == prop_id)
+    }
 
     fn values_populated(&self) -> bool;
 }
@@ -91,6 +94,7 @@ pub(crate) struct PropertyRegisterEntry {
     pub prop_id: HomieID,
     pub mk_description: fn() -> HomiePropertyDescription,
     pub from_value: fn(Value) -> Result<Arc<dyn Send + Sync + PropertyValue>, ()>,
+    pub from_str: fn(&str) -> Result<Arc<dyn Send + Sync + PropertyValue>, ()>,
 }
 
 macro_rules! property_registers {
@@ -103,7 +107,11 @@ macro_rules! property_registers {
                 from_value: |v| {
                     let v = <$ty as TryFrom<Value>>::try_from(v)?;
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
-                }
+                },
+                from_str: |v| {
+                    let v = <$ty as TryFrom<&str>>::try_from(v).map_err(|_| todo!())?;
+                    Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
+                },
             },)*]
         }
     }

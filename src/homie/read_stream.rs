@@ -107,7 +107,7 @@ fn modbus_read_stream(
     period: Duration,
 ) -> impl Send + Sync + Stream<Item = Result<Response, ReadStreamError>> {
     let next_slot = Arc::new(Mutex::new(Instant::now()));
-    futures::stream::repeat(modbus.new_transaction_id()).then(move |transaction_id| {
+    futures::stream::repeat(()).then(move |()| {
         let modbus = Arc::clone(&modbus);
         let next_slot = Arc::clone(&next_slot);
         async move {
@@ -116,6 +116,7 @@ fn modbus_read_stream(
                     let timeout = *next_slot.lock().unwrap_or_else(|e| e.into_inner());
                     tokio::time::sleep_until(timeout).await;
                 }
+                let transaction_id = modbus.new_transaction_id();
                 let outcome = modbus
                     .send(Request {
                         device_id: 1,
