@@ -7,8 +7,8 @@
 //! * Whether the alarm is "pending" for the other state (in case of a firing alarm, clearing it
 //! does not immediately make it go away -- instead it goes into the state "firing but cleared".)
 //!
-//! This perfectly maps to the `$target` mechanism exposed in Homie and so most of the alarms have
-//! an `$target` property associated with them. For consistency the summary alarms use the same
+//! This maps okay to the `$target` mechanism exposed in Homie and so most of the alarms have an
+//! `$target` property associated with them. For consistency the summary alarms use the same
 //! mechanism, even though they cannot be set and will never have a target that isn't equal to the
 //! value.
 //!
@@ -22,60 +22,7 @@ use homie5::device_description::{
 };
 use homie5::{HomieDataType, HomieID};
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
-
-#[derive(Copy, Clone, PartialEq, Eq, strum::FromRepr, strum::EnumString)]
-#[repr(u8)]
-pub enum AlarmValue {
-    Clear = 0,
-    Firing = 1,
-    Evaluating = 2,
-    Acknowledged = 3,
-}
-
-impl TryFrom<Value> for AlarmValue {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        let byte = u8::try_from(value.into_inner()).map_err(|_| ())?;
-        Self::from_repr(byte).ok_or(())
-    }
-}
-
-impl PropertyValue for AlarmValue {
-    fn modbus(&self) -> Value {
-        unreachable!("alarm values are not writable, this should not be reachable")
-    }
-
-    fn value(&self) -> String {
-        match self {
-            AlarmValue::Clear | AlarmValue::Evaluating => "clear",
-            AlarmValue::Firing | AlarmValue::Acknowledged => "firing",
-        }
-        .to_string()
-    }
-
-    fn target(&self) -> Option<String> {
-        Some(
-            match self {
-                AlarmValue::Clear | AlarmValue::Acknowledged => "clear",
-                AlarmValue::Firing | AlarmValue::Evaluating => "firing",
-            }
-            .to_string(),
-        )
-    }
-}
-
-impl PropertyDescription for AlarmValue {
-    fn description() -> homie5::device_description::HomiePropertyDescription {
-        let alarm_property_format =
-            HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
-        PropertyDescriptionBuilder::new(HomieDataType::Enum)
-            .retained(true)
-            .format(alarm_property_format.clone())
-            .build()
-    }
-}
 
 static REGISTERS: [PropertyRegisterEntry; 35] = property_registers![
     (15002 is "supply-air-fan-control": AlarmValue),
@@ -168,5 +115,56 @@ impl Node for AlarmNode {
         }
         self.device_values[index] = Some(value);
         return Some(old_value);
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, strum::FromRepr, strum::EnumString)]
+#[repr(u8)]
+pub enum AlarmValue {
+    Clear = 0,
+    Firing = 1,
+    Evaluating = 2,
+    Acknowledged = 3,
+}
+
+impl TryFrom<Value> for AlarmValue {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        let byte = u8::try_from(value.into_inner()).map_err(|_| ())?;
+        Self::from_repr(byte).ok_or(())
+    }
+}
+
+impl PropertyValue for AlarmValue {
+    fn modbus(&self) -> Value {
+        unreachable!("alarm values are not writable, this should not be reachable")
+    }
+
+    fn value(&self) -> String {
+        match self {
+            AlarmValue::Clear | AlarmValue::Evaluating => "clear",
+            AlarmValue::Firing | AlarmValue::Acknowledged => "firing",
+        }
+        .to_string()
+    }
+
+    fn target(&self) -> Option<String> {
+        Some(
+            match self {
+                AlarmValue::Clear | AlarmValue::Acknowledged => "clear",
+                AlarmValue::Firing | AlarmValue::Evaluating => "firing",
+            }
+            .to_string(),
+        )
+    }
+}
+
+impl PropertyDescription for AlarmValue {
+    fn description() -> homie5::device_description::HomiePropertyDescription {
+        let alarm_property_format =
+            HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
+        PropertyDescriptionBuilder::new(HomieDataType::Enum)
+            .format(alarm_property_format.clone())
+            .build()
     }
 }

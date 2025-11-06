@@ -108,10 +108,14 @@ macro_rules! property_registers {
                 prop_id: HomieID::new_const($n),
                 mk_description: <$ty as PropertyDescription>::description,
                 from_value: |v| {
+                    use std::sync::Arc;
+                    use crate::homie::common::PropertyValue;
                     let v = <$ty as TryFrom<Value>>::try_from(v)?;
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
                 },
                 from_str: |v| {
+                    use std::sync::Arc;
+                    use crate::homie::common::PropertyValue;
                     let v = <$ty as TryFrom<&str>>::try_from(v).map_err(|_| todo!("error handling"))?;
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
                 },

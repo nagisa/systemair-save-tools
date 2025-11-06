@@ -1,14 +1,12 @@
-//! Exposes fan speed settings as a homie node.
-
 use crate::homie::common::{
-    adjust_for_register, homie_enum, BooleanValue, PropertyDescription, PropertyValue, UintValue,
+    adjust_for_register, homie_enum, string_enum, BooleanValue, PropertyDescription, PropertyValue,
+    UintValue,
 };
 use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
 use crate::registers::{RegisterIndex, Value};
-use homie5::device_description::{HomieNodeDescription, HomiePropertyDescription};
+use homie5::device_description::HomieNodeDescription;
 use homie5::HomieID;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 
 static REGISTERS: [PropertyRegisterEntry; 71] = super::node::property_registers![
@@ -101,7 +99,7 @@ impl FanSpeedSettingsNode {
 
 impl Node for FanSpeedSettingsNode {
     fn node_id(&self) -> HomieID {
-        HomieID::new_const("fan-speed-settings")
+        HomieID::new_const("fan-speed")
     }
 
     fn description(&self) -> HomieNodeDescription {
@@ -114,7 +112,7 @@ impl Node for FanSpeedSettingsNode {
             })
             .collect::<BTreeMap<_, _>>();
         HomieNodeDescription {
-            name: Some("fan speed settings".to_string()),
+            name: Some("fan speed settings and status".to_string()),
             r#type: None,
             properties,
         }
@@ -142,100 +140,40 @@ impl Node for FanSpeedSettingsNode {
     }
 }
 
-#[repr(u16)]
-#[derive(
-    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
-)]
-#[strum(serialize_all = "kebab-case")]
-enum AirflowLevel {
-    Off = 0,
-    Minimum = 1,
-    Low = 2,
-    Normal = 3,
-    High = 4,
-    Maximum = 5,
-}
-impl PropertyValue for AirflowLevel {
-    fn modbus(&self) -> Value {
-        Value::U16(*self as u16)
-    }
-    fn value(&self) -> String {
-        <&'static str>::from(self).to_string()
-    }
-}
-impl PropertyDescription for AirflowLevel {
-    fn description() -> HomiePropertyDescription {
-        homie_enum::<Self>().build()
-    }
-}
-impl TryFrom<Value> for AirflowLevel {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Self::from_repr(value.into_inner()).ok_or(())
+string_enum! {
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum AirflowLevel {
+        Off = 0,
+        Minimum = 1,
+        Low = 2,
+        Normal = 3,
+        High = 4,
+        Maximum = 5,
     }
 }
 
-#[repr(u16)]
-#[derive(
-    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
-)]
-#[strum(serialize_all = "kebab-case")]
-enum WeeklyScheduleLevel {
-    Off = 0,
-    Minimum = 1,
-    Low = 2,
-    Normal = 3,
-    High = 4,
-    DemandControl = 5,
-}
-impl PropertyValue for WeeklyScheduleLevel {
-    fn modbus(&self) -> Value {
-        Value::U16(*self as u16)
-    }
-    fn value(&self) -> String {
-        <&'static str>::from(self).to_string()
-    }
-}
-impl PropertyDescription for WeeklyScheduleLevel {
-    fn description() -> HomiePropertyDescription {
-        homie_enum::<Self>().build()
-    }
-}
-impl TryFrom<Value> for WeeklyScheduleLevel {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Self::from_repr(value.into_inner()).ok_or(())
+string_enum! {
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum WeeklyScheduleLevel {
+        Off = 0,
+        Minimum = 1,
+        Low = 2,
+        Normal = 3,
+        High = 4,
+        DemandControl = 5,
     }
 }
 
-#[repr(u16)]
-#[derive(
-    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
-)]
-#[strum(serialize_all = "kebab-case")]
-enum RegulationType {
-    Manual = 0,
-    RPM = 1,
-    ConstantPressure = 2,
-    ConstantFlow = 3,
-    External = 4,
-}
-impl TryFrom<Value> for RegulationType {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Self::from_repr(value.into_inner()).ok_or(())
-    }
-}
-impl PropertyValue for RegulationType {
-    fn modbus(&self) -> Value {
-        Value::U16(*self as u16)
-    }
-    fn value(&self) -> String {
-        <&'static str>::from(self).to_string()
-    }
-}
-impl PropertyDescription for RegulationType {
-    fn description() -> HomiePropertyDescription {
-        homie_enum::<Self>().build()
+string_enum! {
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum RegulationType {
+        Manual = 0,
+        RPM = 1,
+        ConstantPressure = 2,
+        ConstantFlow = 3,
+        External = 4,
     }
 }

@@ -1,12 +1,11 @@
 use crate::homie::common::{
-    adjust_for_register, homie_enum, CelsiusValue, PropertyDescription, PropertyValue, UintValue,
+    adjust_for_register, homie_enum, string_enum, CelsiusValue, PropertyDescription, PropertyValue, UintValue
 };
 use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::HomieNodeDescription;
 use homie5::HomieID;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use tokio::sync::broadcast::Sender;
 
 static REGISTERS: [PropertyRegisterEntry; 8] = super::node::property_registers![
@@ -77,32 +76,11 @@ impl Node for CompensationNode {
     }
 }
 
-#[repr(u16)]
-#[derive(
-    Clone, Copy, strum::VariantNames, strum::FromRepr, strum::IntoStaticStr, strum::EnumString,
-)]
-#[strum(serialize_all = "kebab-case")]
-enum CompensationType {
-    SafOnly = 0,
-    SafEaf = 1,
-}
-
-impl TryFrom<Value> for CompensationType {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Self::from_repr(value.into_inner()).ok_or(())
-    }
-}
-impl PropertyValue for CompensationType {
-    fn modbus(&self) -> Value {
-        Value::U16(*self as u16)
-    }
-    fn value(&self) -> String {
-        <&'static str>::from(self).to_string()
-    }
-}
-impl PropertyDescription for CompensationType {
-    fn description() -> homie5::device_description::HomiePropertyDescription {
-        homie_enum::<Self>().build()
+string_enum! {
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum CompensationType {
+        SafOnly = 0,
+        SafEaf = 1,
     }
 }

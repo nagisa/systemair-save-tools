@@ -18,6 +18,7 @@ pub(crate) fn adjust_for_register(
     register: RegisterIndex,
 ) {
     description.settable = register.mode().is_writable();
+    description.retained = true;
     let min = register.minimum_value().map(|v| match v {
         Value::U16(v) => i64::from(v),
         Value::I16(v) => i64::from(v),
@@ -147,3 +148,48 @@ impl PropertyDescription for CelsiusValue {
             .build()
     }
 }
+
+macro_rules! string_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $($variant:ident = $value:literal),* $(,)?
+        }
+    ) => {
+        #[derive(
+            strum::VariantNames,
+            strum::FromRepr,
+            strum::IntoStaticStr,
+            strum::EnumString,
+        )]
+        #[strum(serialize_all = "kebab-case")]
+        $(#[$meta])*
+        $vis enum $name {
+            $($variant = $value),*
+        }
+
+        impl TryFrom<Value> for $name {
+            type Error = ();
+            fn try_from(value: crate::registers::Value) -> Result<Self, Self::Error> {
+                Self::from_repr(value.into_inner()).ok_or(())
+            }
+        }
+
+        impl PropertyValue for $name {
+            fn modbus(&self) -> crate::registers::Value {
+                crate::registers::Value::U16(*self as u16)
+            }
+            fn value(&self) -> String {
+                <&'static str>::from(self).to_string()
+            }
+        }
+
+        impl PropertyDescription for $name {
+            fn description() -> homie5::device_description::HomiePropertyDescription {
+                homie_enum::<Self>().build()
+            }
+        }
+    };
+}
+
+pub(crate) use string_enum;

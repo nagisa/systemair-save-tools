@@ -2,7 +2,7 @@ mod alarm_node;
 mod common;
 mod compensation_node;
 mod node;
-// mod demand_control_node;
+mod demand_control_node;
 mod fan_speed_setting_node;
 mod read_stream;
 
@@ -47,7 +47,7 @@ impl SystemAirDevice {
         let (sender, node_events) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
         let nodes = [
             Box::new(alarm_node::AlarmNode::new(sender.clone())) as Box<dyn Node>,
-            // Box::new(demand_control_node::DemandControlNode) as _,
+            Box::new(demand_control_node::DemandControlNode::new(sender.clone())) as _,
             Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new(
                 sender.clone(),
             )) as _,
@@ -232,6 +232,8 @@ impl SystemAirDevice {
                 let value = value.modbus().into_inner();
                 let operation = Operation::SetHolding { address, value };
                 tracing::info!(address, value, because = "mqtt set", "writing");
+                // FIXME: this wants to be away from the main step loop somehow.
+                // Spawn maybe? Into the void perhaps?? And then publish a node event??
                 self.modbus
                     .send(Request {
                         device_id: 1,
