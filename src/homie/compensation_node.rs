@@ -83,8 +83,8 @@ impl Node for CompensationNode {
 )]
 #[strum(serialize_all = "kebab-case")]
 enum CompensationType {
-    SafOnly,
-    SafEaf,
+    SafOnly = 0,
+    SafEaf = 1,
 }
 
 impl TryFrom<Value> for CompensationType {
@@ -94,6 +94,9 @@ impl TryFrom<Value> for CompensationType {
     }
 }
 impl PropertyValue for CompensationType {
+    fn modbus(&self) -> Value {
+        Value::U16(*self as u16)
+    }
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }

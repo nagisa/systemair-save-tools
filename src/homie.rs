@@ -10,7 +10,7 @@ use crate::connection::Connection;
 use crate::homie::common::PropertyValue;
 use crate::homie::node::{Node, NodeEvent};
 use crate::homie::read_stream::RegisterEvent;
-use crate::modbus::{Response, ResponseKind};
+use crate::modbus::{Operation, Request, Response, ResponseKind};
 use futures::StreamExt as _;
 use homie5::client::{Publish, QoS, Subscription};
 use homie5::device_description::HomieDeviceDescription;
@@ -228,9 +228,20 @@ impl SystemAirDevice {
                 };
                 let value = (prop.from_str)(&value).expect("TODO");
                 let transaction_id = self.modbus.new_transaction_id();
-                todo!();
-                // let operation = crate::modbus::Operation::
-                // self.modbus.send(crate::modbus::Request { device_id: 1, transaction_id, operation: () }
+                let address = prop.register.address();
+                let value = value.modbus().into_inner();
+                let operation = Operation::SetHolding { address, value };
+                tracing::info!(address, value, because = "mqtt set", "writing");
+                self.modbus
+                    .send(Request {
+                        device_id: 1,
+                        transaction_id,
+                        operation,
+                    })
+                    .await
+                    .expect("TODO");
+
+                drop(idx); // readback the value, though go through an iteration first...
             }
             Command::Reload { property } => todo!(),
         }

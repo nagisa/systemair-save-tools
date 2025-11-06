@@ -43,6 +43,10 @@ impl TryFrom<Value> for AlarmValue {
 }
 
 impl PropertyValue for AlarmValue {
+    fn modbus(&self) -> Value {
+        unreachable!("alarm values are not writable, this should not be reachable")
+    }
+
     fn value(&self) -> String {
         match self {
             AlarmValue::Clear | AlarmValue::Evaluating => "clear",
@@ -70,15 +74,6 @@ impl PropertyDescription for AlarmValue {
             .retained(true)
             .format(alarm_property_format.clone())
             .build()
-    }
-}
-
-impl AlarmValue {
-    fn firing(&self) -> bool {
-        matches!(self, AlarmValue::Firing | AlarmValue::Acknowledged)
-    }
-    fn targetting_firing(&self) -> bool {
-        matches!(self, AlarmValue::Firing | AlarmValue::Evaluating)
     }
 }
 

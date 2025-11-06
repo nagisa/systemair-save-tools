@@ -156,6 +156,9 @@ enum AirflowLevel {
     Maximum = 5,
 }
 impl PropertyValue for AirflowLevel {
+    fn modbus(&self) -> Value {
+        Value::U16(*self as u16)
+    }
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }
@@ -186,6 +189,9 @@ enum WeeklyScheduleLevel {
     DemandControl = 5,
 }
 impl PropertyValue for WeeklyScheduleLevel {
+    fn modbus(&self) -> Value {
+        Value::U16(*self as u16)
+    }
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }
@@ -221,6 +227,9 @@ impl TryFrom<Value> for RegulationType {
     }
 }
 impl PropertyValue for RegulationType {
+    fn modbus(&self) -> Value {
+        Value::U16(*self as u16)
+    }
     fn value(&self) -> String {
         <&'static str>::from(self).to_string()
     }

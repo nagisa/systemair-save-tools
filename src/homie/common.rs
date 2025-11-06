@@ -50,6 +50,7 @@ pub(crate) fn adjust_for_register(
 }
 
 pub(crate) trait PropertyValue: Send + Sync {
+    fn modbus(&self) -> Value;
     fn value(&self) -> String;
     fn target(&self) -> Option<String> {
         None
@@ -82,6 +83,9 @@ impl TryFrom<&str> for BooleanValue {
     }
 }
 impl PropertyValue for BooleanValue {
+    fn modbus(&self) -> Value {
+        Value::U16(self.0 as u16)
+    }
     fn value(&self) -> String {
         self.0.to_string()
     }
@@ -101,6 +105,9 @@ impl TryFrom<&str> for UintValue {
     }
 }
 impl PropertyValue for UintValue {
+    fn modbus(&self) -> Value {
+        Value::U16(self.0)
+    }
     fn value(&self) -> String {
         self.0.to_string()
     }
@@ -111,11 +118,11 @@ impl PropertyDescription for UintValue {
     }
 }
 
-pub(crate) struct CelsiusValue(pub(crate) u16);
+pub(crate) struct CelsiusValue(pub(crate) i16);
 impl TryFrom<Value> for CelsiusValue {
     type Error = ();
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Ok(Self(value.into_inner()))
+        Ok(Self(value.into_inner() as i16))
     }
 }
 impl TryFrom<&str> for CelsiusValue {
@@ -126,6 +133,9 @@ impl TryFrom<&str> for CelsiusValue {
     }
 }
 impl PropertyValue for CelsiusValue {
+    fn modbus(&self) -> Value {
+        Value::Celsius(self.0)
+    }
     fn value(&self) -> String {
         (self.0 as f32 / DataType::CEL.scale() as f32).to_string()
     }

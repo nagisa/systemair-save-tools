@@ -488,7 +488,7 @@ pub mod write {
                     ..
                 }) => {
                     // IAM seems to be returning garbage in `value` here...
-                    tracing::info!(address, value, "register set")
+                    tracing::info!(address, response = value, "register set")
                 }
                 Some(Response { kind: _, .. }) => {
                     tracing::warn!(address, "unexpected response to a set command")

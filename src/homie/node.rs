@@ -69,7 +69,10 @@ pub trait Node {
 
     fn property_by_name(&self, prop_id: &HomieID) -> Option<(usize, &PropertyRegisterEntry)> {
         let registers = self.registers();
-        registers.iter().enumerate().find(|(_, v)| &v.prop_id == prop_id)
+        registers
+            .iter()
+            .enumerate()
+            .find(|(_, v)| &v.prop_id == prop_id)
     }
 
     fn values_populated(&self) -> bool;
@@ -109,7 +112,7 @@ macro_rules! property_registers {
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
                 },
                 from_str: |v| {
-                    let v = <$ty as TryFrom<&str>>::try_from(v).map_err(|_| todo!())?;
+                    let v = <$ty as TryFrom<&str>>::try_from(v).map_err(|_| todo!("error handling"))?;
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
                 },
             },)*]
