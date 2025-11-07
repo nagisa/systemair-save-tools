@@ -1,16 +1,16 @@
 mod alarm_node;
-mod common;
 mod compensation_node;
-mod node;
 mod demand_control_node;
 mod fan_speed_setting_node;
+mod node;
 mod read_stream;
+mod value;
 
 use crate::connection::Connection;
-use crate::homie::common::PropertyValue;
 use crate::homie::node::{Node, NodeEvent};
 use crate::homie::read_stream::RegisterEvent;
-use crate::modbus::{Operation, Request, Response, ResponseKind};
+use crate::homie::value::PropertyValue;
+use crate::modbus::{Operation, Request};
 use futures::StreamExt as _;
 use homie5::client::{Publish, QoS, Subscription};
 use homie5::device_description::HomieDeviceDescription;
@@ -20,7 +20,6 @@ use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_util::task::AbortOnDropHandle;
 
 pub struct SystemAirDevice {

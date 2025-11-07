@@ -4,9 +4,9 @@
 //! the `winter/summer`-specific setpoints may be more interesting.
 //!
 //! Everything else is bog-standard boolean/integer parameters.
-use super::common::{homie_enum, BooleanValue};
+use super::value::{homie_enum, BooleanValue};
 use super::PropertyValue;
-use crate::homie::common::{adjust_for_register, string_enum, PropertyDescription, UintValue};
+use crate::homie::value::{adjust_for_register, string_enum, PropertyDescription, UintValue};
 use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::HomieNodeDescription;

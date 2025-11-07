@@ -14,7 +14,7 @@
 //!
 //! TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
 
-use crate::homie::common::{PropertyDescription, PropertyValue};
+use crate::homie::value::{PropertyDescription, PropertyValue};
 use crate::homie::node::{property_registers, Node, NodeEvent, PropertyRegisterEntry};
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{

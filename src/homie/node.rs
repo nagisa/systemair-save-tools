@@ -1,11 +1,8 @@
-use crate::homie::common::PropertyValue;
+use crate::homie::value::PropertyValue;
 use crate::registers::{RegisterIndex, Value};
-use homie5::device_description::{
-    HomieNodeDescription, HomiePropertyDescription, PropertyDescriptionBuilder,
-};
-use homie5::{HomieDataType, HomieID};
+use homie5::device_description::{HomieNodeDescription, HomiePropertyDescription};
+use homie5::HomieID;
 use std::sync::Arc;
-use tokio::sync::broadcast::Receiver;
 
 pub trait Node {
     /// The ID for this homie node.
@@ -109,13 +106,13 @@ macro_rules! property_registers {
                 mk_description: <$ty as PropertyDescription>::description,
                 from_value: |v| {
                     use std::sync::Arc;
-                    use crate::homie::common::PropertyValue;
+                    use crate::homie::value::PropertyValue;
                     let v = <$ty as TryFrom<Value>>::try_from(v)?;
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
                 },
                 from_str: |v| {
                     use std::sync::Arc;
-                    use crate::homie::common::PropertyValue;
+                    use crate::homie::value::PropertyValue;
                     let v = <$ty as TryFrom<&str>>::try_from(v).map_err(|_| todo!("error handling"))?;
                     Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
                 },

@@ -1,4 +1,4 @@
-use crate::homie::common::{
+use crate::homie::value::{
     adjust_for_register, homie_enum, string_enum, CelsiusValue, PropertyDescription, PropertyValue, UintValue
 };
 use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
