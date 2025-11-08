@@ -24,20 +24,19 @@ pub(crate) enum PropertyKind {
     /// This property is a 1:1 mapping to a modbus register.
     Register {
         register: RegisterIndex,
-
         // FIXME: error handling
-        /// Conversion from modbus value to the property value.
         from_modbus: fn(Value) -> Result<Box<DynPropertyValue>, ()>,
-
         // FIXME: error handling
-        /// Conversion from mqtt/homie value string to the property value.
-        from_str: fn(&str) -> Result<Box<DynPropertyValue>, ()>,
+        from_homie: fn(&str) -> Result<Box<DynPropertyValue>, ()>,
     },
     /// An action that node implements custom handling logic for.
-    Action,
+    Action {
+        from_homie: fn(&str) -> Result<Box<DynPropertyValue>, ()>,
+    },
     Aggregate {
         registers: &'static [RegisterIndex],
         from_modbus: fn(&ModbusDeviceValues) -> Option<Result<Box<DynPropertyValue>, ()>>,
+        from_homie: fn(&str) -> Result<Box<DynPropertyValue>, ()>,
     },
 }
 
@@ -54,7 +53,7 @@ impl PropertyKind {
                 let v = <T as TryFrom<Value>>::try_from(v)?;
                 Ok(Box::new(v) as Box<DynPropertyValue>)
             },
-            from_str: |v| {
+            from_homie: |v| {
                 let v = <T as TryFrom<&str>>::try_from(v).map_err(|_| ())?;
                 Ok(Box::new(v) as Box<DynPropertyValue>)
             },
@@ -65,7 +64,7 @@ impl PropertyKind {
     pub(crate) fn registers(&self) -> Box<dyn Iterator<Item = RegisterIndex>> {
         match self {
             PropertyKind::Register { register, .. } => Box::new(std::iter::once(*register)),
-            PropertyKind::Action => Box::new(std::iter::empty()),
+            PropertyKind::Action { .. } => Box::new(std::iter::empty()),
             PropertyKind::Aggregate { registers, .. } => Box::new(registers.iter().copied()),
         }
     }
@@ -83,8 +82,16 @@ impl PropertyKind {
                 let modbus_value = modbus.value_of(*register)?;
                 Some(from_modbus(modbus_value))
             }
-            PropertyKind::Action => None,
+            PropertyKind::Action { .. } => None,
             PropertyKind::Aggregate { from_modbus, .. } => from_modbus(modbus),
+        }
+    }
+
+    pub(crate) fn value_from_homie(&self, mqtt: &str) -> Result<Box<DynPropertyValue>, ()> {
+        match self {
+            PropertyKind::Register { from_homie, .. }
+            | PropertyKind::Action { from_homie }
+            | PropertyKind::Aggregate { from_homie, .. } => from_homie(mqtt),
         }
     }
 }
@@ -99,7 +106,7 @@ impl PropertyEntry {
     pub fn description(&self) -> HomiePropertyDescription {
         let mut initial = (self.mk_description)();
         match self.kind {
-            PropertyKind::Action => {
+            PropertyKind::Action { .. } => {
                 initial.retained = false;
                 initial.settable = true;
             }
@@ -169,7 +176,11 @@ macro_rules! properties {
         PropertyEntry {
             prop_id: HomieID::new_const($prop_id),
             mk_description: <$value_type as $crate::homie::value::PropertyDescription>::description,
-            kind: $crate::homie::node::PropertyKind::Action,
+            kind: $crate::homie::node::PropertyKind::Action {
+                from_homie: |_v| {
+                    todo!()
+                }
+            },
         }
     };
     (@property $prop_id:literal: $value_type:ty = aggregate $($register:literal),+) => {
@@ -185,6 +196,9 @@ macro_rules! properties {
                         modbus.value_of(const { RegisterIndex::from_name($register).unwrap() })?
                     ),*);
                     Some(result.map(|v| Box::new(v) as _))
+                },
+                from_homie: |_v| {
+                    todo!()
                 }
             },
         }

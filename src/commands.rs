@@ -607,7 +607,7 @@ pub mod mqtt {
                     match Command::try_from_mqtt_command(msg) {
                         Ok(cmd) => command_tx.send(cmd).expect("TODO"),
                         Err(unexpected) => {
-                            tracing::info!(?unexpected, "unexpected mqtt command received")
+                            tracing::warn!(?unexpected, "unexpected mqtt command received")
                         }
                     }
                 }
