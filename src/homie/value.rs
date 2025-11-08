@@ -1,15 +1,29 @@
+use crate::homie::node::PropertyEntry;
 use crate::registers::{DataType, Value};
 use homie5::device_description::{
     HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
 use homie5::HomieDataType;
 
-pub(crate) fn homie_enum<T: strum::VariantNames>() -> PropertyDescriptionBuilder {
-    PropertyDescriptionBuilder::new(HomieDataType::Enum).format(homie_enum_format::<T>())
-}
-
-pub(crate) fn homie_enum_format<T: strum::VariantNames>() -> HomiePropertyFormat {
-    HomiePropertyFormat::Enum(T::VARIANTS.iter().copied().map(Into::into).collect())
+pub(crate) fn homie_enum<T: strum::VariantNames + strum::VariantArray + num_traits::ToPrimitive>(
+    prop: &PropertyEntry,
+) -> PropertyDescriptionBuilder {
+    let names = <T as strum::VariantNames>::VARIANTS;
+    let values = <T as strum::VariantArray>::VARIANTS;
+    let format = match prop.kind {
+        super::node::PropertyKind::Action { .. } | super::node::PropertyKind::Aggregate { .. } => {
+            HomiePropertyFormat::Enum(names.iter().copied().map(Into::into).collect())
+        }
+        super::node::PropertyKind::Register { register, .. } => {
+            let min = register.minimum_value().unwrap().into_inner();
+            let max = register.maximum_value().unwrap().into_inner();
+            let zip = names.iter().zip(values);
+            let converted = zip.map(|(n, v)| (*n, v.to_u16().unwrap()));
+            let filtered_names = converted.filter(|&(_, v)| v >= min && v <= max);
+            HomiePropertyFormat::Enum(filtered_names.map(|v| v.0.into()).collect())
+        }
+    };
+    PropertyDescriptionBuilder::new(HomieDataType::Enum).format(format)
 }
 
 pub(crate) trait PropertyValue: Send + Sync {
@@ -23,12 +37,12 @@ pub(crate) trait PropertyValue: Send + Sync {
 pub(crate) type DynPropertyValue = dyn Send + Sync + PropertyValue;
 
 pub(crate) trait PropertyDescription {
-    fn description() -> HomiePropertyDescription;
+    fn description(prop: &PropertyEntry) -> HomiePropertyDescription;
 }
 
 pub(crate) struct BooleanValue(pub(crate) bool);
 impl PropertyDescription for BooleanValue {
-    fn description() -> HomiePropertyDescription {
+    fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
         PropertyDescriptionBuilder::new(HomieDataType::Boolean).build()
     }
 }
@@ -68,14 +82,14 @@ impl TryFrom<&str> for UintValue {
 }
 impl PropertyValue for UintValue {
     fn modbus(&self) -> Value {
-        Value::U16(self.0)
+        Value::U16(self.0 as u16)
     }
     fn value(&self) -> String {
         self.0.to_string()
     }
 }
 impl PropertyDescription for UintValue {
-    fn description() -> HomiePropertyDescription {
+    fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
         PropertyDescriptionBuilder::new(HomieDataType::Integer).build()
     }
 }
@@ -96,14 +110,14 @@ impl TryFrom<&str> for CelsiusValue {
 }
 impl PropertyValue for CelsiusValue {
     fn modbus(&self) -> Value {
-        Value::Celsius(self.0)
+        Value::U16(self.0 as u16)
     }
     fn value(&self) -> String {
         (self.0 as f32 / DataType::CEL.scale() as f32).to_string()
     }
 }
 impl PropertyDescription for CelsiusValue {
-    fn description() -> HomiePropertyDescription {
+    fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
         PropertyDescriptionBuilder::new(HomieDataType::Float)
             .unit(homie5::HOMIE_UNIT_DEGREE_CELSIUS)
             .build()
@@ -119,9 +133,11 @@ macro_rules! string_enum {
     ) => {
         #[derive(
             strum::VariantNames,
+            strum::VariantArray,
             strum::FromRepr,
             strum::IntoStaticStr,
             strum::EnumString,
+            num_derive::ToPrimitive,
         )]
         #[strum(serialize_all = "kebab-case")]
         $(#[$meta])*
@@ -146,8 +162,8 @@ macro_rules! string_enum {
         }
 
         impl $crate::homie::value::PropertyDescription for $name {
-            fn description() -> homie5::device_description::HomiePropertyDescription {
-                $crate::homie::value::homie_enum::<Self>().build()
+            fn description(prop: &$crate::homie::node::PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
+                $crate::homie::value::homie_enum::<Self>(prop).build()
             }
         }
     };

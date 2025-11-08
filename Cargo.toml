@@ -23,3 +23,5 @@ tracing-subscriber = { version = "0.3.19" }
 homie5 = { version = "0.8.0" }
 strum = { version = "0.26.3", features = ["derive"] }
 tokio-stream = { version = "0.1.17", features = ["sync"] }
+num-derive = "0.4.2"
+num-traits = "0.2.19"

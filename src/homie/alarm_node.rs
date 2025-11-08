@@ -152,7 +152,7 @@ impl PropertyValue for AlarmValue {
 }
 
 impl PropertyDescription for AlarmValue {
-    fn description() -> homie5::device_description::HomiePropertyDescription {
+    fn description(_: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
         let alarm_property_format =
             HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
         PropertyDescriptionBuilder::new(HomieDataType::Enum)

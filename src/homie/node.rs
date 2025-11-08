@@ -98,13 +98,13 @@ impl PropertyKind {
 
 pub(crate) struct PropertyEntry {
     pub prop_id: HomieID,
-    pub mk_description: fn() -> HomiePropertyDescription,
+    pub mk_description: fn(&PropertyEntry) -> HomiePropertyDescription,
     pub kind: PropertyKind,
 }
 
 impl PropertyEntry {
     pub fn description(&self) -> HomiePropertyDescription {
-        let mut initial = (self.mk_description)();
+        let mut initial = (self.mk_description)(&self);
         match self.kind {
             PropertyKind::Action { .. } => {
                 initial.retained = false;
