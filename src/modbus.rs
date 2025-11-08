@@ -4,6 +4,8 @@ use tracing::trace;
 
 use crate::registers::{RegisterIndex, Value};
 
+pub const MAX_SAFE_READ_COUNT: u16 = 123;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Request {
     pub device_id: u8,

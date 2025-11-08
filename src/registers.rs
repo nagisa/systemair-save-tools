@@ -39,14 +39,18 @@ impl DataType {
         std::iter::from_fn(move || {
             let (v, remainder) = bs.split_first_chunk::<2>()?;
             bs = remainder;
-            Some(match self {
-                Self::I16 => Value::I16(i16::from_be_bytes(*v)),
-                Self::U16 => Value::U16(u16::from_be_bytes(*v)),
-                Self::CEL => Value::Celsius(i16::from_be_bytes(*v)),
-                Self::SPH => Value::SpecificHumidity(u16::from_be_bytes(*v)),
-                _ => panic!("malformed DataType"),
-            })
+            Some(self.from_word(u16::from_be_bytes(*v)))
         })
+    }
+
+    pub fn from_word(self, word: u16) -> Value {
+        match self {
+            Self::I16 => Value::I16(word as i16),
+            Self::U16 => Value::U16(word),
+            Self::CEL => Value::Celsius(word as i16),
+            Self::SPH => Value::SpecificHumidity(word),
+            _ => panic!("malformed DataType"),
+        }
     }
 
     pub fn parse_string(self, string: &str) -> Result<Value, ParseValueError> {
@@ -136,10 +140,10 @@ impl Into<String> for Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            Value::U16(n) => f.write_fmt(format_args!("{}", n)),
-            Value::I16(n) => f.write_fmt(format_args!("{}", n)),
-            Value::Celsius(n) => f.write_fmt(format_args!("{}", n as f32 / 10.0)),
-            Value::SpecificHumidity(n) => f.write_fmt(format_args!("{}", n as f32 / 10.0)),
+            Value::U16(n) => <u16 as std::fmt::Display>::fmt(&n, f),
+            Value::I16(n) => <i16 as std::fmt::Display>::fmt(&n, f),
+            Value::Celsius(n) => <f32 as std::fmt::Display>::fmt(&(n as f32 / 10.0), f),
+            Value::SpecificHumidity(n) => <f32 as std::fmt::Display>::fmt(&(n as f32 / 10.0), f),
         }
     }
 }
@@ -1089,18 +1093,18 @@ pub static DESCRIPTIONS: &[&str] = &const {
             1131 => {
                 "Fan speed level for mode Manual. Applies to both the SAF and the EAF fan. 0=Off, \
                  2=Low, 3=Normal, 4=High. Value Off only allowed if contents of register \
-                 REG_FAN_MANUAL_STOP_ALLOWED is 1."
+                 FAN_MANUAL_STOP_ALLOWED is 1."
             }
             1135 | 1136 => "Fan speed level for mode Crowded. 3=Normal, 4=High, 5=Maximum",
             1137 | 1138 => "Fan speed level for mode Refresh. 3=Normal, 4=High, 5=Maximum",
             1139 | 1140 => "Fan speed level for mode Fire Place. 1=Minimum, 2=Low, 3=Normal",
             1141 | 1142 => {
                 "Fan speed level for mode Away. Value Off only allowed if contents of register \
-                 REG_FAN_MANUAL_STOP_ALLOWED is 1."
+                 FAN_MANUAL_STOP_ALLOWED is 1."
             }
             1143 | 1144 => {
                 "Fan speed level for mode Holiday. Value Off only allowed if contents of register \
-                 REG_FAN_MANUAL_STOP_ALLOWED is 1."
+                 FAN_MANUAL_STOP_ALLOWED is 1."
             }
             1145 | 1146 => "Fan speed level for mode Cooker Hood. 1=Minimum, 2=Low, 3=Normal",
             1147 | 1148 => "Fan speed level for mode Vacuum Cleaner. 1=Minimum, 2=Low, 3=Normal",
@@ -1342,7 +1346,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
                 "Flag indicating if DST is enabled. 0=Daylight saving time not enabled, 1=Daylight \
                  saving time enabled"
             }
-            6008 => "Indicates the presentation of time in the HMI. 24H/12H",
+            6008 => "Indicates the presentation of time in the HMI. 0=12H, 1=24H",
             6009 => "Monday (0)...Sunday (6)",
             6011 => "Now time in seconds. Lower 16 bits.",
             6012 => "Now time in seconds. Higher 16 bits.",

@@ -1,124 +1,194 @@
-use crate::homie::value::PropertyValue;
+use crate::homie::value::{DynPropertyValue, PropertyValue};
+use crate::modbus_device_cache::ModbusDeviceValues;
 use crate::registers::{RegisterIndex, Value};
-use homie5::device_description::{HomieNodeDescription, HomiePropertyDescription};
-use homie5::HomieID;
-use std::sync::Arc;
+use homie5::device_description::{
+    FloatRange, HomieNodeDescription, HomiePropertyDescription, IntegerRange,
+};
+use homie5::{HomieDataType, HomieID};
 
 pub trait Node {
     /// The ID for this homie node.
     fn node_id(&self) -> HomieID;
     /// The Homie description for the node.
     fn description(&self) -> HomieNodeDescription;
-    fn broadcast_node_event(&self, node_event: NodeEvent);
-    fn registers(&self) -> &'static [PropertyRegisterEntry];
-    // Should return Some of the previous value if the value has changed.
-    //
-    // Index is the index into the `registers` slice.
-    fn record_register_value(&mut self, index: usize, value: Value) -> Option<Option<Value>>;
+    fn properties(&self) -> &[PropertyEntry];
+    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue>;
+    fn set_property_value(
+        &mut self,
+        property_index: usize,
+        value: Box<DynPropertyValue>,
+    ) -> Option<Box<DynPropertyValue>>;
+}
 
-    fn on_register_value(&mut self, register: RegisterIndex, value: Value) {
-        let registers = self.registers();
-        let Ok(idx) = registers.binary_search_by_key(&register, |v| v.register) else {
-            return;
-        };
-        let Some(old_value) = self.record_register_value(idx, value) else {
-            return;
-        };
-        let PropertyRegisterEntry {
-            prop_id,
-            from_value,
-            ..
-        } = &registers[idx];
-        let old_value = old_value.map(from_value);
-        let new_value = from_value(value);
-        let (tgt_changed, val_changed, new) = match (old_value, new_value) {
-            (None | Some(Err(_)) | Some(Ok(_)), Err(_)) => {
-                tracing::debug!(
-                    ?value,
-                    address = register.address(),
-                    ?prop_id,
-                    "could not parse value from device"
-                );
-                return;
+pub(crate) enum PropertyKind {
+    /// This property is a 1:1 mapping to a modbus register.
+    Register {
+        register: RegisterIndex,
+
+        // FIXME: error handling
+        /// Conversion from modbus value to the property value.
+        from_modbus: fn(Value) -> Result<Box<DynPropertyValue>, ()>,
+
+        // FIXME: error handling
+        /// Conversion from mqtt/homie value string to the property value.
+        from_str: fn(&str) -> Result<Box<DynPropertyValue>, ()>,
+    },
+    /// An action that node implements custom handling logic for.
+    Action,
+    Aggregate {
+        registers: &'static [RegisterIndex],
+        from_modbus: fn(&ModbusDeviceValues) -> Option<Result<Box<DynPropertyValue>, ()>>,
+    },
+}
+
+impl PropertyKind {
+    pub(crate) const fn new_register<T, E>(name: &str) -> Self
+    where
+        T: PropertyValue + 'static,
+        T: TryFrom<Value, Error = ()>,
+        T: for<'a> TryFrom<&'a str, Error = E>,
+    {
+        Self::Register {
+            register: RegisterIndex::from_name(name).expect("invalid register name"),
+            from_modbus: |v| {
+                let v = <T as TryFrom<Value>>::try_from(v)?;
+                Ok(Box::new(v) as Box<DynPropertyValue>)
+            },
+            from_str: |v| {
+                let v = <T as TryFrom<&str>>::try_from(v).map_err(|_| ())?;
+                Ok(Box::new(v) as Box<DynPropertyValue>)
+            },
+        }
+    }
+
+    /// All registers this property is interested in.
+    pub(crate) fn registers(&self) -> Box<dyn Iterator<Item = RegisterIndex>> {
+        match self {
+            PropertyKind::Register { register, .. } => Box::new(std::iter::once(*register)),
+            PropertyKind::Action => Box::new(std::iter::empty()),
+            PropertyKind::Aggregate { registers, .. } => Box::new(registers.iter().copied()),
+        }
+    }
+
+    pub(crate) fn value_from_modbus(
+        &self,
+        modbus: &ModbusDeviceValues,
+    ) -> Option<Result<Box<DynPropertyValue>, ()>> {
+        match self {
+            PropertyKind::Register {
+                register,
+                from_modbus,
+                ..
+            } => {
+                let modbus_value = modbus.value_of(*register)?;
+                Some(from_modbus(modbus_value))
             }
-            (None | Some(Err(_)), Ok(new)) => (new.has_target(), true, new),
-            (Some(Ok(old)), Ok(new)) => (
-                new.has_target() && old.target() != new.target(),
-                old.value() != new.value(),
-                new,
-            ),
-        };
-        if tgt_changed {
-            self.broadcast_node_event(NodeEvent::TargetChanged {
-                node_id: self.node_id(),
-                prop_id: prop_id.clone(),
-                new: Arc::clone(&new) as _,
-            });
-        }
-        if val_changed {
-            self.broadcast_node_event(NodeEvent::PropertyChanged {
-                node_id: self.node_id(),
-                prop_id: prop_id.clone(),
-                new,
-            });
+            PropertyKind::Action => None,
+            PropertyKind::Aggregate { from_modbus, .. } => from_modbus(modbus),
         }
     }
-
-    fn property_by_name(&self, prop_id: &HomieID) -> Option<(usize, &PropertyRegisterEntry)> {
-        let registers = self.registers();
-        registers
-            .iter()
-            .enumerate()
-            .find(|(_, v)| &v.prop_id == prop_id)
-    }
-
-    fn values_populated(&self) -> bool;
 }
 
-#[derive(Clone)]
-pub enum NodeEvent {
-    PropertyChanged {
-        node_id: HomieID,
-        prop_id: HomieID,
-        new: Arc<dyn PropertyValue>,
-    },
-    TargetChanged {
-        node_id: HomieID,
-        prop_id: HomieID,
-        new: Arc<dyn PropertyValue>,
-    },
-}
-
-pub(crate) struct PropertyRegisterEntry {
-    pub register: RegisterIndex,
+pub(crate) struct PropertyEntry {
     pub prop_id: HomieID,
     pub mk_description: fn() -> HomiePropertyDescription,
-    pub from_value: fn(Value) -> Result<Arc<dyn Send + Sync + PropertyValue>, ()>,
-    pub from_str: fn(&str) -> Result<Arc<dyn Send + Sync + PropertyValue>, ()>,
+    pub kind: PropertyKind,
 }
 
-macro_rules! property_registers {
-    ($(($i: literal is $n: literal: $ty: ty),)*) => {
-        const {
-            [$(PropertyRegisterEntry {
-                register: RegisterIndex::from_address($i).unwrap(),
-                prop_id: HomieID::new_const($n),
-                mk_description: <$ty as PropertyDescription>::description,
-                from_value: |v| {
-                    use std::sync::Arc;
-                    use crate::homie::value::PropertyValue;
-                    let v = <$ty as TryFrom<Value>>::try_from(v)?;
-                    Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
-                },
-                from_str: |v| {
-                    use std::sync::Arc;
-                    use crate::homie::value::PropertyValue;
-                    let v = <$ty as TryFrom<&str>>::try_from(v).map_err(|_| todo!("error handling"))?;
-                    Ok(Arc::new(v) as Arc<dyn Send + Sync + PropertyValue>)
-                },
-            },)*]
+impl PropertyEntry {
+    pub fn description(&self) -> HomiePropertyDescription {
+        let mut initial = (self.mk_description)();
+        match self.kind {
+            PropertyKind::Action => {
+                initial.retained = false;
+                initial.settable = true;
+            }
+            PropertyKind::Aggregate { .. } => {
+                // Aggregate values decide for themselves if they're writable or not.
+                initial.retained = true;
+            }
+            PropertyKind::Register { register, .. } => {
+                initial.settable = register.mode().is_writable();
+                initial.retained = true;
+                let min = register.minimum_value().map(|v| match v {
+                    Value::U16(v) => i64::from(v),
+                    Value::I16(v) => i64::from(v),
+                    Value::Celsius(v) => i64::from(v),
+                    Value::SpecificHumidity(v) => i64::from(v),
+                });
+                let max = register.maximum_value().map(|v| match v {
+                    Value::U16(v) => i64::from(v),
+                    Value::I16(v) => i64::from(v),
+                    Value::Celsius(v) => i64::from(v),
+                    Value::SpecificHumidity(v) => i64::from(v),
+                });
+                'no_format: {
+                    (&mut initial).format = match (initial.datatype, min, max) {
+                        (HomieDataType::Boolean, Some(min), Some(max)) => {
+                            assert_eq!((min, max), (0, 1), "{} is not bool", register.address());
+                            break 'no_format;
+                        }
+                        (HomieDataType::Integer, min, max) => IntegerRange {
+                            min,
+                            max,
+                            step: None,
+                        }
+                        .into(),
+                        (HomieDataType::Float, min, max) => FloatRange {
+                            min: min.map(|v| v as f64 / register.data_type().scale() as f64),
+                            max: max.map(|v| v as f64 / register.data_type().scale() as f64),
+                            step: Some(1.0f64 / register.data_type().scale() as f64),
+                        }
+                        .into(),
+                        _ => break 'no_format,
+                    }
+                }
+            }
         }
+        initial
     }
 }
 
-pub(crate) use property_registers;
+macro_rules! properties {
+    (static $static:ident = [$( { $prop_id:literal: $value_type:ty = $($tokens:tt)* }, )*]) => {
+        static $static: [PropertyEntry; 0 $(+ $crate::homie::node::properties!(@one $prop_id))*] = [
+            $($crate::homie::node::properties!(@property $prop_id: $value_type = $($tokens)*)),*
+        ];
+    };
+
+    (@one $prop_id: literal) => { 1 };
+
+    (@property $prop_id:literal: $value_type:ty = register $name:literal) => {
+        PropertyEntry {
+            prop_id: HomieID::new_const($prop_id),
+            mk_description: <$value_type as $crate::homie::value::PropertyDescription>::description,
+            kind: $crate::homie::node::PropertyKind::new_register::<$value_type, _>($name)
+        }
+    };
+    (@property $prop_id:literal: $value_type:ty = action) => {
+        PropertyEntry {
+            prop_id: HomieID::new_const($prop_id),
+            mk_description: <$value_type as $crate::homie::value::PropertyDescription>::description,
+            kind: $crate::homie::node::PropertyKind::Action,
+        }
+    };
+    (@property $prop_id:literal: $value_type:ty = aggregate $($register:literal),+) => {
+        PropertyEntry {
+            prop_id: HomieID::new_const($prop_id),
+            mk_description: <$value_type as $crate::homie::value::PropertyDescription>::description,
+            kind: $crate::homie::node::PropertyKind::Aggregate {
+                registers: &[$(
+                    RegisterIndex::from_name($register).expect("invalid register name")
+                ),+],
+                from_modbus: |modbus| {
+                    let result = <$value_type>::new($(
+                        modbus.value_of(const { RegisterIndex::from_name($register).unwrap() })?
+                    ),*);
+                    Some(result.map(|v| Box::new(v) as _))
+                }
+            },
+        }
+    };
+}
+
+pub(crate) use properties;

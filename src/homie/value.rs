@@ -13,53 +13,15 @@ pub(crate) fn homie_enum_format<T: strum::VariantNames>() -> HomiePropertyFormat
     HomiePropertyFormat::Enum(T::VARIANTS.iter().copied().map(Into::into).collect())
 }
 
-pub(crate) fn adjust_for_register(
-    description: &mut HomiePropertyDescription,
-    register: RegisterIndex,
-) {
-    description.settable = register.mode().is_writable();
-    description.retained = true;
-    let min = register.minimum_value().map(|v| match v {
-        Value::U16(v) => i64::from(v),
-        Value::I16(v) => i64::from(v),
-        Value::Celsius(v) => i64::from(v),
-        Value::SpecificHumidity(v) => i64::from(v),
-    });
-    let max = register.minimum_value().map(|v| match v {
-        Value::U16(v) => i64::from(v),
-        Value::I16(v) => i64::from(v),
-        Value::Celsius(v) => i64::from(v),
-        Value::SpecificHumidity(v) => i64::from(v),
-    });
-    'no_format: {
-        description.format = match (description.datatype, min, max) {
-            (HomieDataType::Integer, min, max) => IntegerRange {
-                min,
-                max,
-                step: None,
-            }
-            .into(),
-            (HomieDataType::Float, min, max) => FloatRange {
-                min: min.map(|v| v as f64 / register.data_type().scale() as f64),
-                max: max.map(|v| v as f64 / register.data_type().scale() as f64),
-                step: Some(1.0f64 / register.data_type().scale() as f64),
-            }
-            .into(),
-            _ => break 'no_format,
-        }
-    }
-}
-
 pub(crate) trait PropertyValue: Send + Sync {
     fn modbus(&self) -> Value;
     fn value(&self) -> String;
     fn target(&self) -> Option<String> {
         None
     }
-    fn has_target(&self) -> bool {
-        false
-    }
 }
+
+pub(crate) type DynPropertyValue = dyn Send + Sync + PropertyValue;
 
 pub(crate) trait PropertyDescription {
     fn description() -> HomiePropertyDescription;
@@ -175,7 +137,7 @@ macro_rules! string_enum {
             }
         }
 
-        impl PropertyValue for $name {
+        impl $crate::homie::value::PropertyValue for $name {
             fn modbus(&self) -> crate::registers::Value {
                 crate::registers::Value::U16(*self as u16)
             }
@@ -184,9 +146,9 @@ macro_rules! string_enum {
             }
         }
 
-        impl PropertyDescription for $name {
+        impl $crate::homie::value::PropertyDescription for $name {
             fn description() -> homie5::device_description::HomiePropertyDescription {
-                homie_enum::<Self>().build()
+                $crate::homie::value::homie_enum::<Self>().build()
             }
         }
     };

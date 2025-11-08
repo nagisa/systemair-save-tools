@@ -12,66 +12,67 @@
 //! mechanism, even though they cannot be set and will never have a target that isn't equal to the
 //! value.
 //!
-//! TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
 
-use crate::homie::value::{PropertyDescription, PropertyValue};
-use crate::homie::node::{property_registers, Node, NodeEvent, PropertyRegisterEntry};
-use crate::registers::{RegisterIndex, Value};
+// TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
+
+use crate::homie::node::{Node, PropertyEntry};
+use crate::homie::value::{DynPropertyValue, PropertyDescription, PropertyValue};
+use crate::registers::Value;
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
 use homie5::{HomieDataType, HomieID};
 use std::collections::BTreeMap;
-use tokio::sync::broadcast::Sender;
 
-static REGISTERS: [PropertyRegisterEntry; 35] = property_registers![
-    (15002 is "supply-air-fan-control": AlarmValue),
-    (15009 is "extract-air-fan-control": AlarmValue),
-    (15016 is "frost-protection": AlarmValue),
-    (15023 is "defrosting": AlarmValue),
-    (15030 is "supply-air-fan-rpm": AlarmValue),
-    (15037 is "extract-air-fan-rpm": AlarmValue),
-    (15058 is "frost-protection-sensor": AlarmValue),
-    (15065 is "outdoor-air-temperature": AlarmValue),
-    (15072 is "supply-air-temperature": AlarmValue),
-    (15079 is "room-air-temperature": AlarmValue),
-    (15086 is "extract-air-temperature": AlarmValue),
-    (15093 is "extra-controller-temperature": AlarmValue),
-    (15100 is "eft": AlarmValue), // TODO: de-TLA this name
-    (15107 is "overheat-protection-sensor": AlarmValue),
-    (15114 is "emergency-thermostat": AlarmValue),
-    (15121 is "rotor-guard": AlarmValue),
-    (15128 is "bypass-damper-position-sensor": AlarmValue),
-    (15135 is "secondary-air": AlarmValue),
-    (15142 is "filter": AlarmValue),
-    (15149 is "extra-controller": AlarmValue),
-    (15156 is "external-stop": AlarmValue),
-    (15163 is "relative-humidity": AlarmValue),
-    (15170 is "co2": AlarmValue),
-    (15177 is "low-supply-air-temperature": AlarmValue),
-    (15184 is "byf": AlarmValue), // TODO: de-TLA this name: probably has something to do with bypass damper.
-    (15502 is "manual-override-outputs": AlarmValue),
-    (15509 is "pdm-room-humidity-sensor": AlarmValue), // PDM = pulse density modulation
-    (15516 is "pdm-extract-room-temperature": AlarmValue),
-    (15523 is "manual-fan-stop": AlarmValue),
-    (15530 is "overheat-temperature": AlarmValue),
-    (15537 is "fire": AlarmValue),
-    (15544 is "filter-warning": AlarmValue),
-    (15901 is "summary-type-a": AlarmValue),
-    (15902 is "summary-type-b": AlarmValue),
-    (15903 is "summary-type-c": AlarmValue),
-];
+super::node::properties! { static PROPERTIES = [
+     { "supply-air-fan-control": AlarmValue = register "ALARM_SAF_CTRL_ALARM" },
+     { "extract-air-fan-control": AlarmValue = register "ALARM_EAF_CTRL_ALARM" },
+     { "frost-protection": AlarmValue = register "ALARM_FROST_PROT_ALARM" },
+     { "defrosting": AlarmValue = register "ALARM_DEFROSTING_ALARM" },
+     { "supply-air-fan-rpm": AlarmValue = register "ALARM_SAF_RPM_ALARM" },
+     { "extract-air-fan-rpm": AlarmValue = register "ALARM_EAF_RPM_ALARM" },
+     { "frost-protection-sensor": AlarmValue = register "ALARM_FPT_ALARM" },
+     { "outdoor-air-temperature": AlarmValue = register "ALARM_OAT_ALARM" },
+     { "supply-air-temperature": AlarmValue = register "ALARM_SAT_ALARM" },
+     { "room-air-temperature": AlarmValue = register "ALARM_RAT_ALARM" },
+     { "extract-air-temperature": AlarmValue = register "ALARM_EAT_ALARM" },
+     { "extra-controller-temperature": AlarmValue = register "ALARM_ECT_ALARM" },
+     // TODO: de-TLA this name
+     { "eft": AlarmValue = register "ALARM_EFT_ALARM" },
+     { "overheat-protection-sensor": AlarmValue = register "ALARM_OHT_ALARM" },
+     { "emergency-thermostat": AlarmValue = register "ALARM_EMT_ALARM" },
+     { "rotor-guard": AlarmValue = register "ALARM_RGS_ALARM" },
+     { "bypass-damper-position-sensor": AlarmValue = register "ALARM_BYS_ALARM" },
+     { "secondary-air": AlarmValue = register "ALARM_SECONDARY_AIR_ALARM" },
+     { "filter": AlarmValue = register "ALARM_FILTER_ALARM" },
+     { "extra-controller": AlarmValue = register "ALARM_EXTRA_CONTROLLER_ALARM" },
+     { "external-stop": AlarmValue = register "ALARM_EXTERNAL_STOP_ALARM" },
+     { "relative-humidity": AlarmValue = register "ALARM_RH_ALARM" },
+     { "co2": AlarmValue = register "ALARM_CO2_ALARM" },
+     { "low-supply-air-temperature": AlarmValue = register "ALARM_LOW_SAT_ALARM" },
+     // TODO: de-TLA this name: probably has something to do with bypass damper.
+     { "byf": AlarmValue = register "ALARM_BYF_ALARM" },
+     { "manual-override-outputs": AlarmValue = register "ALARM_MANUAL_OVERRIDE_OUTPUTS_ALARM" },
+     { "pdm-room-humidity-sensor": AlarmValue = register "ALARM_PDM_RHS_ALARM" }, // PDM = pulse density modulation
+     { "pdm-extract-room-temperature": AlarmValue = register "ALARM_PDM_EAT_ALARM" },
+     { "manual-fan-stop": AlarmValue = register "ALARM_MANUAL_FAN_STOP_ALARM" },
+     { "overheat-temperature": AlarmValue = register "ALARM_OVERHEAT_TEMPERATURE_ALARM" },
+     { "fire": AlarmValue = register "ALARM_FIRE_ALARM_ALARM" },
+     { "filter-warning": AlarmValue = register "ALARM_FILTER_WARNING_ALARM" },
+     // TODO: add filter warning duration.
+     { "summary-type-a": AlarmValue = register "ALARM_TYPE_A" },
+     { "summary-type-b": AlarmValue = register "ALARM_TYPE_B" },
+     { "summary-type-c": AlarmValue = register "ALARM_TYPE_C" },
+] }
 
 pub struct AlarmNode {
-    device_values: [Option<Value>; REGISTERS.len()],
-    sender: Sender<NodeEvent>,
+    values: [Option<Box<DynPropertyValue>>; PROPERTIES.len()],
 }
 
 impl AlarmNode {
-    pub fn new(sender: Sender<NodeEvent>) -> Self {
+    pub fn new() -> Self {
         Self {
-            device_values: [None; REGISTERS.len()],
-            sender,
+            values: [const { None }; PROPERTIES.len()],
         }
     }
 }
@@ -81,13 +82,9 @@ impl Node for AlarmNode {
         HomieID::new_const("alarm")
     }
     fn description(&self) -> HomieNodeDescription {
-        let properties = REGISTERS
+        let properties = PROPERTIES
             .iter()
-            .map(|prop| {
-                let mut description = (prop.mk_description)();
-                description.settable = prop.register.mode().is_writable();
-                (prop.prop_id.clone(), description)
-            })
+            .map(|prop| (prop.prop_id.clone(), prop.description()))
             .collect::<BTreeMap<_, _>>();
         HomieNodeDescription {
             name: Some("device alarm management".to_string()),
@@ -96,25 +93,20 @@ impl Node for AlarmNode {
         }
     }
 
-    fn values_populated(&self) -> bool {
-        self.device_values.iter().all(|v| v.is_some())
+    fn properties(&self) -> &'static [super::node::PropertyEntry] {
+        &PROPERTIES
     }
 
-    fn broadcast_node_event(&self, node_event: NodeEvent) {
-        let _ignore_no_receivers = self.sender.send(node_event);
+    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue> {
+        self.values[property_index].as_deref()
     }
 
-    fn registers(&self) -> &'static [super::node::PropertyRegisterEntry] {
-        &REGISTERS
-    }
-
-    fn record_register_value(&mut self, index: usize, value: Value) -> Option<Option<Value>> {
-        let old_value = self.device_values[index];
-        if old_value == Some(value) {
-            return None;
-        }
-        self.device_values[index] = Some(value);
-        return Some(old_value);
+    fn set_property_value(
+        &mut self,
+        property_index: usize,
+        value: Box<DynPropertyValue>,
+    ) -> Option<Box<DynPropertyValue>> {
+        self.values[property_index].replace(value)
     }
 }
 

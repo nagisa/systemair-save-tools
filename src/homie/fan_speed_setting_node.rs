@@ -1,98 +1,94 @@
-use crate::homie::value::{
-    adjust_for_register, homie_enum, string_enum, BooleanValue, PropertyDescription, PropertyValue,
-    UintValue,
-};
-use crate::homie::node::{Node, NodeEvent, PropertyRegisterEntry};
-use crate::registers::{RegisterIndex, Value};
+use crate::homie::node::{Node, PropertyEntry};
+use crate::homie::value::{string_enum, BooleanValue, DynPropertyValue, UintValue};
+use crate::registers::Value;
 use homie5::device_description::HomieNodeDescription;
 use homie5::HomieID;
 use std::collections::BTreeMap;
-use tokio::sync::broadcast::Sender;
 
-static REGISTERS: [PropertyRegisterEntry; 71] = super::node::property_registers![
-    (1121 is "min-demand-control": AirflowLevel),
-    (1122 is "max-demand-control": AirflowLevel),
-    (1131 is "usermode-manual": AirflowLevel),
-    (1135 is "usermode-crowded-supply": AirflowLevel),
-    (1136 is "usermode-crowded-extract": AirflowLevel),
-    (1137 is "usermode-refresh-supply": AirflowLevel),
-    (1138 is "usermode-refresh-extract": AirflowLevel),
-    (1139 is "usermode-fireplace-supply": AirflowLevel),
-    (1140 is "usermode-fireplace-extract": AirflowLevel),
-    (1141 is "usermode-away-supply": AirflowLevel),
-    (1142 is "usermode-away-extract": AirflowLevel),
-    (1143 is "usermode-holiday-supply": AirflowLevel),
-    (1144 is "usermode-holiday-extract": AirflowLevel),
-    (1145 is "usermode-cooker-hood-supply": AirflowLevel),
-    (1146 is "usermode-cooker-hood-extract": AirflowLevel),
-    (1147 is "usermode-vacuum-cleaner-supply": AirflowLevel),
-    (1148 is "usermode-vacuum-cleaner-extract": AirflowLevel),
-    (1171 is "digital-input-1-supply": AirflowLevel),
-    (1172 is "digital-input-1-extract": AirflowLevel),
-    (1173 is "digital-input-2-supply": AirflowLevel),
-    (1174 is "digital-input-2-extract": AirflowLevel),
-    (1175 is "digital-input-3-supply": AirflowLevel),
-    (1176 is "digital-input-3-extract": AirflowLevel),
-    (1177 is "pressure-guard-supply": AirflowLevel),
-    (1178 is "pressure-guard-extract": AirflowLevel),
-    (1274 is "regulation-type": RegulationType),
-    (1353 is "allow-manual-stop": BooleanValue),
-    (1401 is "supply-percentage-for-minimum": UintValue),
-    (1402 is "extract-percentage-for-minimum": UintValue),
-    (1403 is "supply-percentage-for-low": UintValue),
-    (1404 is "extract-percentage-for-low": UintValue),
-    (1405 is "supply-percentage-for-normal": UintValue),
-    (1406 is "extract-percentage-for-normal": UintValue),
-    (1407 is "supply-percentage-for-high": UintValue),
-    (1408 is "extract-percentage-for-high": UintValue),
-    (1409 is "supply-percentage-for-maximum": UintValue),
-    (1410 is "extract-percentage-for-maximum": UintValue),
-    (1411 is "supply-rpm-for-minimum": UintValue),
-    (1412 is "extract-rpm-for-minimum": UintValue),
-    (1413 is "supply-rpm-for-low": UintValue),
-    (1414 is "extract-rpm-for-low": UintValue),
-    (1415 is "supply-rpm-for-normal": UintValue),
-    (1416 is "extract-rpm-for-normal": UintValue),
-    (1417 is "supply-rpm-for-high": UintValue),
-    (1418 is "extract-rpm-for-high": UintValue),
-    (1419 is "supply-rpm-for-maximum": UintValue),
-    (1420 is "extract-rpm-for-maximum": UintValue),
-    (1421 is "supply-pressure-for-minimum": UintValue),
-    (1422 is "extract-pressure-for-minimum": UintValue),
-    (1423 is "supply-pressure-for-low": UintValue),
-    (1424 is "extract-pressure-for-low": UintValue),
-    (1425 is "supply-pressure-for-normal": UintValue),
-    (1426 is "extract-pressure-for-normal": UintValue),
-    (1427 is "supply-pressure-for-high": UintValue),
-    (1428 is "extract-pressure-for-high": UintValue),
-    (1429 is "supply-pressure-for-maximum": UintValue),
-    (1430 is "extract-pressure-for-maximum": UintValue),
-    (1431 is "supply-flow-for-minimum": UintValue),
-    (1432 is "extract-flow-for-minimum": UintValue),
-    (1433 is "supply-flow-for-low": UintValue),
-    (1434 is "extract-flow-for-low": UintValue),
-    (1435 is "supply-flow-for-normal": UintValue),
-    (1436 is "extract-flow-for-normal": UintValue),
-    (1437 is "supply-flow-for-high": UintValue),
-    (1438 is "extract-flow-for-high": UintValue),
-    (1439 is "supply-flow-for-maximum": UintValue),
-    (1440 is "extract-flow-for-maximum": UintValue),
-    (4112 is "min-free-cooling-supply": AirflowLevel),
-    (4113 is "min-free-cooling-extract": AirflowLevel),
-    (5060 is "during-active-week-schedule": WeeklyScheduleLevel),
-    (5061 is "during-inactive-week-schedule": WeeklyScheduleLevel),
-];
+super::node::properties! { static PROPERTIES = [
+    { "min-demand-control": AirflowLevel = register "IAQ_SPEED_LEVEL_MIN" },
+    { "max-demand-control": AirflowLevel = register "IAQ_SPEED_LEVEL_MAX" },
+    { "usermode-manual": AirflowLevel = register "USERMODE_MANUAL_AIRFLOW_LEVEL_SAF" },
+    { "usermode-crowded-supply": AirflowLevel = register "USERMODE_CROWDED_AIRFLOW_LEVEL_SAF" },
+    { "usermode-crowded-extract": AirflowLevel = register "USERMODE_CROWDED_AIRFLOW_LEVEL_EAF" },
+    { "usermode-refresh-supply": AirflowLevel = register "USERMODE_REFRESH_AIRFLOW_LEVEL_SAF" },
+    { "usermode-refresh-extract": AirflowLevel = register "USERMODE_REFRESH_AIRFLOW_LEVEL_EAF" },
+    { "usermode-fireplace-supply": AirflowLevel = register "USERMODE_FIREPLACE_AIRFLOW_LEVEL_SAF" },
+    { "usermode-fireplace-extract": AirflowLevel = register "USERMODE_FIREPLACE_AIRFLOW_LEVEL_EAF" },
+    { "usermode-away-supply": AirflowLevel = register "USERMODE_AWAY_AIRFLOW_LEVEL_SAF" },
+    { "usermode-away-extract": AirflowLevel = register "USERMODE_AWAY_AIRFLOW_LEVEL_EAF" },
+    { "usermode-holiday-supply": AirflowLevel = register "USERMODE_HOLIDAY_AIRFLOW_LEVEL_SAF" },
+    { "usermode-holiday-extract": AirflowLevel = register "USERMODE_HOLIDAY_AIRFLOW_LEVEL_EAF" },
+    { "usermode-cooker-hood-supply": AirflowLevel = register "USERMODE_COOKERHOOD_AIRFLOW_LEVEL_SAF" },
+    { "usermode-cooker-hood-extract": AirflowLevel = register "USERMODE_COOKERHOOD_AIRFLOW_LEVEL_EAF" },
+    { "usermode-vacuum-cleaner-supply": AirflowLevel = register "USERMODE_VACUUMCLEANER_AIRFLOW_LEVEL_SAF" },
+    { "usermode-vacuum-cleaner-extract": AirflowLevel = register "USERMODE_VACUUMCLEANER_AIRFLOW_LEVEL_EAF" },
+    { "digital-input-1-supply": AirflowLevel = register "CDI_1_AIRFLOW_LEVEL_SAF" },
+    { "digital-input-1-extract": AirflowLevel = register "CDI_1_AIRFLOW_LEVEL_EAF" },
+    { "digital-input-2-supply": AirflowLevel = register "CDI_2_AIRFLOW_LEVEL_SAF" },
+    { "digital-input-2-extract": AirflowLevel = register "CDI_2_AIRFLOW_LEVEL_EAF" },
+    { "digital-input-3-supply": AirflowLevel = register "CDI_3_AIRFLOW_LEVEL_SAF" },
+    { "digital-input-3-extract": AirflowLevel = register "CDI_3_AIRFLOW_LEVEL_EAF" },
+    { "pressure-guard-supply": AirflowLevel = register "PRESSURE_GUARD_AIRFLOW_LEVEL_SAF" },
+    { "pressure-guard-extract": AirflowLevel = register "PRESSURE_GUARD_AIRFLOW_LEVEL_EAF" },
+    { "min-demand-control-speed": AirflowLevel = register "IAQ_SPEED_LEVEL_MIN" },
+    { "max-demand-control-speed": AirflowLevel = register "IAQ_SPEED_LEVEL_MAX" },
+    { "regulation-type": RegulationType = register "FAN_REGULATION_UNIT" },
+    { "allow-manual-stop": BooleanValue = register "FAN_MANUAL_STOP_ALLOWED" },
+    { "supply-percentage-for-minimum": UintValue = register "FAN_LEVEL_SAF_MIN_PERCENTAGE" },
+    { "extract-percentage-for-minimum": UintValue = register "FAN_LEVEL_EAF_MIN_PERCENTAGE" },
+    { "supply-percentage-for-low": UintValue = register "FAN_LEVEL_SAF_LOW_PERCENTAGE" },
+    { "extract-percentage-for-low": UintValue = register "FAN_LEVEL_EAF_LOW_PERCENTAGE" },
+    { "supply-percentage-for-normal": UintValue = register "FAN_LEVEL_SAF_NORMAL_PERCENTAGE" },
+    { "extract-percentage-for-normal": UintValue = register "FAN_LEVEL_EAF_NORMAL_PERCENTAGE" },
+    { "supply-percentage-for-high": UintValue = register "FAN_LEVEL_SAF_HIGH_PERCENTAGE" },
+    { "extract-percentage-for-high": UintValue = register "FAN_LEVEL_EAF_HIGH_PERCENTAGE" },
+    { "supply-percentage-for-maximum": UintValue = register "FAN_LEVEL_SAF_MAX_PERCENTAGE" },
+    { "extract-percentage-for-maximum": UintValue = register "FAN_LEVEL_EAF_MAX_PERCENTAGE" },
+    { "supply-rpm-for-minimum": UintValue = register "FAN_LEVEL_SAF_MIN_RPM" },
+    { "extract-rpm-for-minimum": UintValue = register "FAN_LEVEL_EAF_MIN_RPM" },
+    { "supply-rpm-for-low": UintValue = register "FAN_LEVEL_SAF_LOW_RPM" },
+    { "extract-rpm-for-low": UintValue = register "FAN_LEVEL_EAF_LOW_RPM" },
+    { "supply-rpm-for-normal": UintValue = register "FAN_LEVEL_SAF_NORMAL_RPM" },
+    { "extract-rpm-for-normal": UintValue = register "FAN_LEVEL_EAF_NORMAL_RPM" },
+    { "supply-rpm-for-high": UintValue = register "FAN_LEVEL_SAF_HIGH_RPM" },
+    { "extract-rpm-for-high": UintValue = register "FAN_LEVEL_EAF_HIGH_RPM" },
+    { "supply-rpm-for-maximum": UintValue = register "FAN_LEVEL_SAF_MAX_RPM" },
+    { "extract-rpm-for-maximum": UintValue = register "FAN_LEVEL_EAF_MAX_RPM" },
+    { "supply-pressure-for-minimum": UintValue = register "FAN_LEVEL_SAF_MIN_PRESSURE" },
+    { "extract-pressure-for-minimum": UintValue = register "FAN_LEVEL_EAF_MIN_PRESSURE" },
+    { "supply-pressure-for-low": UintValue = register "FAN_LEVEL_SAF_LOW_PRESSURE" },
+    { "extract-pressure-for-low": UintValue = register "FAN_LEVEL_EAF_LOW_PRESSURE" },
+    { "supply-pressure-for-normal": UintValue = register "FAN_LEVEL_SAF_NORMAL_PRESSURE" },
+    { "extract-pressure-for-normal": UintValue = register "FAN_LEVEL_EAF_NORMAL_PRESSURE" },
+    { "supply-pressure-for-high": UintValue = register "FAN_LEVEL_SAF_HIGH_PRESSURE" },
+    { "extract-pressure-for-high": UintValue = register "FAN_LEVEL_EAF_HIGH_PRESSURE" },
+    { "supply-pressure-for-maximum": UintValue = register "FAN_LEVEL_SAF_MAX_PRESSURE" },
+    { "extract-pressure-for-maximum": UintValue = register "FAN_LEVEL_EAF_MAX_PRESSURE" },
+    { "supply-flow-for-minimum": UintValue = register "FAN_LEVEL_SAF_MIN_FLOW" },
+    { "extract-flow-for-minimum": UintValue = register "FAN_LEVEL_EAF_MIN_FLOW" },
+    { "supply-flow-for-low": UintValue = register "FAN_LEVEL_SAF_LOW_FLOW" },
+    { "extract-flow-for-low": UintValue = register "FAN_LEVEL_EAF_LOW_FLOW" },
+    { "supply-flow-for-normal": UintValue = register "FAN_LEVEL_SAF_NORMAL_FLOW" },
+    { "extract-flow-for-normal": UintValue = register "FAN_LEVEL_EAF_NORMAL_FLOW" },
+    { "supply-flow-for-high": UintValue = register "FAN_LEVEL_SAF_HIGH_FLOW" },
+    { "extract-flow-for-high": UintValue = register "FAN_LEVEL_EAF_HIGH_FLOW" },
+    { "supply-flow-for-maximum": UintValue = register "FAN_LEVEL_SAF_MAX_FLOW" },
+    { "extract-flow-for-maximum": UintValue = register "FAN_LEVEL_EAF_MAX_FLOW" },
+    { "min-free-cooling-supply": AirflowLevel = register "FREE_COOLING_MIN_SPEED_LEVEL_SAF" },
+    { "min-free-cooling-extract": AirflowLevel = register "FREE_COOLING_MIN_SPEED_LEVEL_EAF" },
+    { "during-active-week-schedule": WeeklyScheduleLevel = register "WS_FAN_LEVEL_SCHEDULED" },
+    { "during-inactive-week-schedule": WeeklyScheduleLevel = register "WS_FAN_LEVEL_UNSCHEDULED" },
+] }
 
 pub struct FanSpeedSettingsNode {
-    device_values: [Option<Value>; REGISTERS.len()],
-    sender: Sender<NodeEvent>,
+    values: [Option<Box<DynPropertyValue>>; PROPERTIES.len()],
 }
 
 impl FanSpeedSettingsNode {
-    pub(crate) fn new(sender: Sender<NodeEvent>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            device_values: [None; _],
-            sender,
+            values: [const { None }; PROPERTIES.len()],
         }
     }
 }
@@ -103,13 +99,9 @@ impl Node for FanSpeedSettingsNode {
     }
 
     fn description(&self) -> HomieNodeDescription {
-        let properties = REGISTERS
+        let properties = PROPERTIES
             .iter()
-            .map(|prop| {
-                let mut description = (prop.mk_description)();
-                adjust_for_register(&mut description, prop.register);
-                (prop.prop_id.clone(), description)
-            })
+            .map(|prop| (prop.prop_id.clone(), prop.description()))
             .collect::<BTreeMap<_, _>>();
         HomieNodeDescription {
             name: Some("fan speed settings and status".to_string()),
@@ -118,25 +110,20 @@ impl Node for FanSpeedSettingsNode {
         }
     }
 
-    fn registers(&self) -> &'static [PropertyRegisterEntry] {
-        &REGISTERS
+    fn properties(&self) -> &'static [super::node::PropertyEntry] {
+        &PROPERTIES
     }
 
-    fn record_register_value(&mut self, index: usize, value: Value) -> Option<Option<Value>> {
-        let old_value = self.device_values[index];
-        if old_value == Some(value) {
-            return None;
-        }
-        self.device_values[index] = Some(value);
-        return Some(old_value);
+    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue> {
+        self.values[property_index].as_deref()
     }
 
-    fn broadcast_node_event(&self, node_event: NodeEvent) {
-        let _ignore_no_receivers = self.sender.send(node_event);
-    }
-
-    fn values_populated(&self) -> bool {
-        self.device_values.iter().all(|v| v.is_some())
+    fn set_property_value(
+        &mut self,
+        property_index: usize,
+        value: Box<DynPropertyValue>,
+    ) -> Option<Box<DynPropertyValue>> {
+        self.values[property_index].replace(value)
     }
 }
 

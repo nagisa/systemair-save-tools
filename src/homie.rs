@@ -2,25 +2,32 @@ mod alarm_node;
 mod compensation_node;
 mod demand_control_node;
 mod fan_speed_setting_node;
+mod clock_node;
 mod node;
-mod read_stream;
 mod value;
 
-use crate::connection::Connection;
-use crate::homie::node::{Node, NodeEvent};
-use crate::homie::read_stream::RegisterEvent;
+use crate::connection::{self, Connection};
+use crate::homie::node::Node;
 use crate::homie::value::PropertyValue;
-use crate::modbus::{Operation, Request};
-use futures::StreamExt as _;
+use crate::modbus::{self, Operation, Request, Response, ResponseKind};
+use crate::modbus_device_cache::{ModbusDeviceValues, RegisterBitmask, SetBitsIterator};
+use futures::stream::SelectAll;
+use futures::{Stream, StreamExt as _};
 use homie5::client::{Publish, QoS, Subscription};
 use homie5::device_description::HomieDeviceDescription;
 use homie5::{Homie5DeviceProtocol, HomieDeviceStatus, HomieID, PropertyRef};
 use std::collections::BTreeMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
-use tokio_util::task::AbortOnDropHandle;
+use tokio::time::Instant;
+
+type ModbusReadStream = SelectAll<
+    Pin<Box<dyn Send + Sync + Stream<Item = Result<(Operation, ResponseKind), connection::Error>>>>,
+>;
 
 pub struct SystemAirDevice {
     mqtt: rumqttc::v5::AsyncClient,
@@ -28,11 +35,10 @@ pub struct SystemAirDevice {
     state: HomieDeviceStatus,
     description: HomieDeviceDescription,
     #[allow(unused)] // exists for its drop handler
-    device_read_task: AbortOnDropHandle<()>,
     nodes: BTreeMap<HomieID, Box<dyn Node>>,
     modbus: Arc<Connection>,
-    read_events: Receiver<RegisterEvent>,
-    node_events: Receiver<NodeEvent>,
+    modbus_values: ModbusDeviceValues,
+    modbus_read_stream: ModbusReadStream,
     commands: mpsc::UnboundedReceiver<Command>,
 }
 
@@ -43,54 +49,30 @@ impl SystemAirDevice {
         modbus: Arc<Connection>,
         commands: mpsc::UnboundedReceiver<Command>,
     ) -> Self {
-        let (sender, node_events) = tokio::sync::broadcast::channel::<NodeEvent>(1024);
         let nodes = [
-            Box::new(alarm_node::AlarmNode::new(sender.clone())) as Box<dyn Node>,
-            Box::new(demand_control_node::DemandControlNode::new(sender.clone())) as _,
-            Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new(
-                sender.clone(),
-            )) as _,
-            Box::new(compensation_node::CompensationNode::new(sender.clone())) as _,
+            Box::new(clock_node::ClockNode::new()) as Box<dyn Node>,
+            Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
+            Box::new(demand_control_node::DemandControlNode::new()) as _,
+            Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new()) as _,
+            Box::new(compensation_node::CompensationNode::new()) as _,
         ];
-        drop(sender);
         let mut description =
             homie5::device_description::DeviceDescriptionBuilder::new().name("SystemAIR SAVE");
         for node in &nodes {
             description = description.add_node(node.node_id(), node.description());
         }
         let description = description.build();
-        let (read_sender, read_events) =
-            tokio::sync::broadcast::channel::<read_stream::RegisterEvent>(1024);
-        let mut read_stream = read_stream::read_device(Arc::clone(&modbus));
-        let device_read_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-            loop {
-                let register_event = match read_stream.next().await {
-                    None => return,
-                    Some(e) => e,
-                };
-                tracing::trace!(
-                    register.address = register_event.register.address(),
-                    register.event = ?register_event.kind,
-                    "read a register event"
-                );
-                let Ok(_) = read_sender.send(register_event) else {
-                    return;
-                };
-            }
-        }));
-        // FIXME: "simply" create senders for each individual node with the same backing buffer??
         let nodes = nodes.into_iter().map(|v| (v.node_id(), v)).collect();
         Self {
             mqtt,
             state: HomieDeviceStatus::Init,
             protocol,
             description,
-            device_read_task,
-            node_events,
-            read_events,
             commands,
             nodes,
             modbus,
+            modbus_values: ModbusDeviceValues::new(),
+            modbus_read_stream: ModbusReadStream::new(),
         }
     }
 
@@ -110,18 +92,31 @@ impl SystemAirDevice {
                     self.mqtt.homie_publish(p).await?;
                 }
                 homie5::DevicePublishStep::PropertyValues => {
-                    tracing::debug!("waiting for device read out…");
-                    let mut all_populated = false;
-                    while !all_populated {
-                        self.step().await.expect("TODO");
-                        all_populated = true;
-                        for (_, node) in &self.nodes {
-                            all_populated &= node.values_populated();
+                    tracing::info!("waiting for device read out…");
+                    let mut need_registers = RegisterBitmask::new();
+                    self.modbus_read_stream.clear();
+                    for (_, node) in &self.nodes {
+                        for property in node.properties() {
+                            for register in property.kind.registers() {
+                                need_registers.set(register.address());
+                            }
                         }
                     }
+                    for range in need_registers.find_optimal_ranges(modbus::MAX_SAFE_READ_COUNT) {
+                        self.schedule_periodic_read(
+                            *range.start(),
+                            u16::try_from(range.len()).unwrap(),
+                            // FIXME: determine read period from node information.
+                            Duration::from_secs(5),
+                        );
+                    }
+
+                    while !self.modbus_values.has_all_values(&need_registers) {
+                        self.step().await.expect("TODO");
+                    }
                     // rumqttc appears to be sending publishes in a weird order that results in
-                    // some of the properties getting published *after* `$state = Ready` unless we
-                    // yield here...
+                    // some of the properties getting published *after* `$state = Ready`. Yielding
+                    // here gives it *some* time to do it's thing.
                     tokio::task::yield_now().await;
                 }
                 homie5::DevicePublishStep::SubscribeProperties => {
@@ -148,137 +143,259 @@ impl SystemAirDevice {
         Ok(())
     }
 
-    async fn handle_node_event(&mut self, node_event: NodeEvent) -> Result<(), ()> {
-        let Self {
-            description,
-            protocol,
-            mqtt,
-            ..
-        } = self;
-        match node_event {
-            NodeEvent::PropertyChanged {
-                node_id,
-                prop_id,
-                new,
-            } => {
-                let Some(pd) = description.get_property_by_id(&node_id, &prop_id) else {
-                    tracing::warn!(
-                        ?node_id,
-                        ?prop_id,
-                        "property change event without description"
-                    );
-                    return Ok(());
-                };
-                let val = new.value();
-                let msg = protocol.publish_value(&node_id, &prop_id, val, pd.retained);
-                mqtt.homie_publish(msg).await.expect("TODO");
+    fn schedule_periodic_read(&mut self, address: u16, count: u16, period: Duration) {
+        use std::sync::Mutex;
+        let next_slot = Arc::new(Mutex::new(Instant::now()));
+        let operation = Operation::GetHoldings { address, count };
+        let modbus = Arc::clone(&self.modbus);
+        let stream = futures::stream::repeat(()).then(move |()| {
+            let modbus = Arc::clone(&modbus);
+            let next_slot = Arc::clone(&next_slot);
+            async move {
+                loop {
+                    {
+                        let timeout = *next_slot.lock().unwrap_or_else(|e| e.into_inner());
+                        tokio::time::sleep_until(timeout).await;
+                    }
+                    let transaction_id = modbus.new_transaction_id();
+                    let outcome = modbus
+                        .send(Request {
+                            device_id: 1,
+                            transaction_id,
+                            operation,
+                        })
+                        .await?;
+                    let Some(result) = outcome else {
+                        continue;
+                    };
+                    let mut next_slot = next_slot.lock().unwrap_or_else(|e| e.into_inner());
+                    if result.is_server_busy() {
+                        // IAM was busy with other requests. Give it some time…
+                        // TODO: maybe add a flag to control this?
+                        // TODO: configurable retry sleep time?
+                        *next_slot = Instant::now() + Duration::from_millis(25);
+                        continue;
+                    }
+                    *next_slot = Instant::now() + period;
+                    return Ok::<_, connection::Error>((operation, result.kind));
+                }
             }
-            NodeEvent::TargetChanged {
-                node_id,
-                prop_id,
-                new,
-            } => {
-                let Some(pd) = description.get_property_by_id(&node_id, &prop_id) else {
-                    tracing::warn!(
-                        ?node_id,
-                        ?prop_id,
-                        "property change event without description"
-                    );
-                    return Ok(());
-                };
-                let val = new.target().unwrap_or_default();
-                let msg = protocol.publish_target(&node_id, &prop_id, val, pd.retained);
-                mqtt.homie_publish(msg).await.expect("TODO");
-            }
-        }
+        });
+        self.modbus_read_stream.push(Box::pin(stream));
+    }
+
+    async fn handle_value_change(&mut self, node_id: &HomieID, prop_idx: usize) -> Result<(), ()> {
+        let node = self.nodes.get(node_id).unwrap();
+        let prop_id = &node.properties()[prop_idx].prop_id;
+        let Some(pd) = self.description.get_property_by_id(node_id, prop_id) else {
+            tracing::warn!(
+                ?node_id,
+                ?prop_id,
+                "property change event without description"
+            );
+            return Ok(());
+        };
+        let val = node
+            .property_value(prop_idx)
+            .map(|v| v.value())
+            .unwrap_or_default();
+        let msg = self
+            .protocol
+            .publish_value(node_id, prop_id, val, pd.retained);
+        self.mqtt.homie_publish(msg).await.expect("TODO");
         Ok(())
     }
 
-    async fn handle_read_event(&mut self, event: RegisterEvent) -> Result<(), ()> {
-        let value = match event.kind {
-            read_stream::RegisterEventKind::Value(value) => value,
-            read_stream::RegisterEventKind::ReadError(read_stream_error) => {
-                tracing::error!(err = ?read_stream_error, "reading error has occurred");
-                return Ok(());
-            }
-            read_stream::RegisterEventKind::ServerException(exc_code) => {
-                tracing::debug!(exc_code, "modbus server exception reported while reading");
-                return Ok(());
-            }
+    async fn handle_target_change(&mut self, node_id: &HomieID, prop_idx: usize) -> Result<(), ()> {
+        let node = self.nodes.get(node_id).unwrap();
+        let prop_id = &node.properties()[prop_idx].prop_id;
+        let Some(pd) = self.description.get_property_by_id(node_id, &prop_id) else {
+            tracing::warn!(
+                ?node_id,
+                ?prop_id,
+                "property change event without description"
+            );
+            return Ok(());
         };
-        for (_, node) in &mut self.nodes {
-            node.on_register_value(event.register, value);
+        let tgt = node
+            .property_value(prop_idx)
+            .and_then(|v| v.target())
+            .unwrap_or_default();
+        let msg = self
+            .protocol
+            .publish_target(&node_id, &prop_id, tgt, pd.retained);
+        self.mqtt.homie_publish(msg).await.expect("TODO");
+        Ok(())
+    }
+
+    async fn handle_modbus_response(
+        &mut self,
+        response: ResponseKind,
+        operation: Operation,
+    ) -> Result<(), ()> {
+        match (response, operation) {
+            (ResponseKind::ErrorCode(code), operation) => {
+                tracing::error!(code, ?operation, "modbus server exception occurred");
+                return Ok(());
+            }
+            (
+                ResponseKind::GetHoldings { values },
+                Operation::GetHoldings { address, count: _ },
+            ) => {
+                let mut changed_registers = RegisterBitmask::new();
+                let (chunks, remainder) = values.as_chunks::<2>();
+                if !remainder.is_empty() {
+                    tracing::warn!(
+                        "response contains non-even number of bytes, modbus is misbehaving"
+                    );
+                }
+                for (word, address) in chunks.iter().zip(address..) {
+                    let word = u16::from_be_bytes(*word);
+                    if self.modbus_values.set_value(address, word) {
+                        changed_registers.set(address);
+                    }
+                }
+
+                let mut changes = vec![];
+                'next_node: for (node_id, node) in &mut self.nodes {
+                    for property in node.properties() {
+                        'next_register: for register in property.kind.registers() {
+                            if !changed_registers.is_set(register.address()) {
+                                continue 'next_register;
+                            }
+                            tracing::debug!(
+                                %node_id,
+                                address = register.address(),
+                                "register change reloads node"
+                            );
+                            for (prop_idx, property) in node.properties().iter().enumerate() {
+                                let old = node.property_value(prop_idx);
+                                let new = property.kind.value_from_modbus(&self.modbus_values);
+                                let node_id = node_id.clone();
+                                let prop_id = &property.prop_id;
+                                match (old, new) {
+                                    (None, None) => continue,
+                                    (Some(_), None) => todo!("erasing a value??"),
+                                    (_, Some(Err(error))) => {
+                                        tracing::debug!(
+                                            %prop_id,
+                                            ?error,
+                                            "could not parse property from device"
+                                        );
+                                    }
+                                    (None, Some(Ok(new))) => {
+                                        let target_changed = new.target().is_some();
+                                        changes.push((
+                                            node_id,
+                                            prop_idx,
+                                            new,
+                                            true,
+                                            target_changed,
+                                        ));
+                                    }
+                                    (Some(old), Some(Ok(new))) => {
+                                        let value = new.value();
+                                        let target = new.target();
+                                        let val_changed = value != old.value();
+                                        let tgt_changed =
+                                            target.is_some() && target != old.target();
+                                        if val_changed || tgt_changed {
+                                            tracing::debug!(%prop_id, "property changed");
+                                            changes.push((
+                                                node_id,
+                                                prop_idx,
+                                                new,
+                                                val_changed,
+                                                tgt_changed,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            continue 'next_node;
+                        }
+                    }
+                }
+                for (node_id, prop_idx, value, value_changed, target_changed) in changes {
+                    self.nodes
+                        .get_mut(&node_id)
+                        .unwrap()
+                        .set_property_value(prop_idx, value);
+                    if value_changed {
+                        self.handle_value_change(&node_id, prop_idx).await?;
+                    }
+                    if target_changed {
+                        self.handle_target_change(&node_id, prop_idx).await?;
+                    }
+                }
+            }
+            (ResponseKind::SetHolding { value: r }, Operation::SetHolding { address, value }) => {
+                tracing::trace!(
+                    address,
+                    value,
+                    response = r,
+                    "set holding operation succeeded"
+                );
+            }
+            (response, request) => {
+                tracing::warn!(
+                    ?request,
+                    ?response,
+                    "modbus request and response type mismatch"
+                )
+            }
         }
         Ok(())
     }
 
     async fn handle_command(&mut self, command: Command) -> Result<(), ()> {
-        match command {
-            Command::Set { property, value } => {
-                if property.device_id() != self.protocol.device_ref().device_id() {
-                    return Err(()); // TODO
-                }
-                let Some(node) = self.nodes.get(property.node_id()) else {
-                    return Err(()); // TODO
-                };
-                // TODO: should probably be moved to `trait Node`
-                let Some((idx, prop)) = node.property_by_name(property.prop_id()) else {
-                    return Err(()); // TODO
-                };
-                let value = (prop.from_str)(&value).expect("TODO");
-                let transaction_id = self.modbus.new_transaction_id();
-                let address = prop.register.address();
-                let value = value.modbus().into_inner();
-                let operation = Operation::SetHolding { address, value };
-                tracing::info!(address, value, because = "mqtt set", "writing");
-                // FIXME: this wants to be away from the main step loop somehow.
-                // Spawn maybe? Into the void perhaps?? And then publish a node event??
-                self.modbus
-                    .send(Request {
-                        device_id: 1,
-                        transaction_id,
-                        operation,
-                    })
-                    .await
-                    .expect("TODO");
-
-                drop(idx); // readback the value, though go through an iteration first...
-            }
-            Command::Reload { property } => todo!(),
+        if self.state != HomieDeviceStatus::Ready {
+            tracing::debug!(?command, "command ignored, device is not ready yet");
+            return Ok(());
         }
+        // match command {
+        //     Command::Set { property, value } => {
+        //         if property.device_id() != self.protocol.device_ref().device_id() {
+        //             return Err(()); // TODO
+        //         }
+        //         let Some(node) = self.nodes.get(property.node_id()) else {
+        //             return Err(()); // TODO
+        //         };
+        //         // TODO: should probably be moved to `trait Node`
+        //         let Some((idx, prop)) = node::property_by_name(&**node, property.prop_id()) else {
+        //             return Err(()); // TODO
+        //         };
+        //         let value = (prop.from_str)(&value).expect("TODO");
+        //         let transaction_id = self.modbus.new_transaction_id();
+        //         let address = prop.register.address();
+        //         let value = value.modbus().into_inner();
+        //         let operation = Operation::SetHolding { address, value };
+        //         tracing::info!(address, value, because = "mqtt set", "writing");
+        //         // FIXME: this wants to be away from the main step loop somehow.
+        //         // Spawn maybe? Into the void perhaps?? And then publish a node event??
+        //         self.modbus
+        //             .send(Request {
+        //                 device_id: 1,
+        //                 transaction_id,
+        //                 operation,
+        //             })
+        //             .await
+        //             .expect("TODO");
+
+        //         drop(idx); // readback the value, though go through an iteration first...
+        //     }
+        //     Command::Reload { property } => todo!(),
+        // }
         Ok(())
     }
 
     pub async fn step(&mut self) -> Result<(), ()> {
         loop {
             tokio::select! {
-                node_event = self.node_events.recv() => {
-                    let event = match node_event {
-                        Ok(event) => event,
-                        // report an error upstream so everything cleans up and finishes execution
-                        Err(RecvError::Closed) => {
-                            todo!();
-                        }
-                        Err(RecvError::Lagged(count)) => {
-                            tracing::warn!(count, "node event handler lagged");
-                            continue;
-                        }
-                    };
-                    return self.handle_node_event(event).await;
-                },
-                read_event = self.read_events.recv() => {
-                    let event = match read_event {
-                        Ok(event) => event,
-                        // report an error upstream so everything cleans up and finishes execution
-                        Err(RecvError::Closed) => {
-                            todo!();
-                        }
-                        Err(RecvError::Lagged(count)) => {
-                            tracing::warn!(count, "read event handler lagged");
-                            continue;
-                        }
-                    };
-                    return self.handle_read_event(event).await;
+                read_event = self.modbus_read_stream.next(), if !self.modbus_read_stream.is_empty() => {
+                    let Some(read_event) = read_event else { continue };
+                    let (operation, response) = read_event.expect("TODO");
+                    return self.handle_modbus_response(response, operation).await;
                 },
                 command = self.commands.recv() => {
                     let Some(command) = command else { todo!() };
@@ -328,12 +445,7 @@ pub fn convert_qos(homie: QoS) -> rumqttc::v5::mqttbytes::QoS {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum ReadStreamError {
-    #[error("could not send a modbus request")]
-    Send(#[source] crate::connection::Error),
-}
-
+#[derive(Debug)]
 pub(crate) enum Command {
     Set {
         property: PropertyRef,
