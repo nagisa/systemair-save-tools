@@ -176,8 +176,8 @@ impl Encoder<&Request> for ModbusRTUCodec {
     type Error = std::io::Error;
     fn encode(
         &mut self,
-        req: &Request,
-        dst: &mut tokio_util::bytes::BytesMut,
+        _req: &Request,
+        _dst: &mut tokio_util::bytes::BytesMut,
     ) -> Result<(), Self::Error> {
         todo!()
     }
@@ -187,7 +187,7 @@ impl Decoder for ModbusRTUCodec {
     type Error = std::io::Error;
     fn decode(
         &mut self,
-        src: &mut tokio_util::bytes::BytesMut,
+        _src: &mut tokio_util::bytes::BytesMut,
     ) -> Result<Option<Self::Item>, Self::Error> {
         todo!()
     }

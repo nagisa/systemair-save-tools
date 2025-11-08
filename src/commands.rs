@@ -389,14 +389,9 @@ pub mod read {
 }
 
 pub mod write {
-    use std::sync::Arc;
-
-    use crate::{
-        commands::registers,
-        connection::{self, Connection},
-        modbus::{Operation, Request, Response, ResponseKind},
-        registers::{ParseValueError, RegisterIndex},
-    };
+    use crate::connection::{self, Connection};
+    use crate::modbus::{Operation, Request, Response, ResponseKind};
+    use crate::registers::{ParseValueError, RegisterIndex};
 
     /// Write the values into specified registers.
     #[derive(clap::Parser)]
@@ -462,7 +457,7 @@ pub mod write {
             let transaction_id = connection.new_transaction_id();
             let outcome = connection
                 .send(Request {
-                    device_id: 1,
+                    device_id: args.device_id,
                     transaction_id,
                     operation: Operation::SetHolding {
                         address: register.address(),
@@ -517,7 +512,7 @@ pub mod mqtt {
     use crate::connection::Connection;
     use crate::homie::Command;
     use crate::{connection, homie};
-    use rumqttc::v5::mqttbytes::v5::{LastWill, Publish};
+    use rumqttc::v5::mqttbytes::v5::LastWill;
     use rumqttc::v5::{AsyncClient, Incoming, MqttOptions};
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -527,6 +522,8 @@ pub mod mqtt {
     pub struct Args {
         #[clap(flatten)]
         connection: connection::Args,
+        #[arg(long, short = 'i', default_value = "1")]
+        pub(super) device_id: u8,
 
         /// How to connect to the MQTT broker.
         ///
@@ -546,17 +543,8 @@ pub mod mqtt {
         #[clap(short = 'p', long, requires = "mqtt_user")]
         mqtt_password: Option<String>,
 
-        #[clap(long, default_value = "homie/systemair")]
-        mqtt_topic_base: String,
-
         #[clap(long, default_value = "systemair-save-tools")]
         device_name: String,
-    }
-
-    impl Args {
-        fn topic(&self, suffix: &str) -> String {
-            format!("{}/{}", self.mqtt_topic_base, suffix)
-        }
     }
 
     #[derive(thiserror::Error, Debug)]
@@ -576,7 +564,7 @@ pub mod mqtt {
         let connection = Arc::new(Connection::new(args.connection).await.unwrap());
 
         let (protocol, last_will) = homie5::Homie5DeviceProtocol::new(
-            "systemair-save".try_into().expect("TODO"),
+            args.device_name.try_into().expect("TODO"),
             homie5::HomieDomain::Default,
         );
         mqtt_options.set_last_will(LastWill::new(
@@ -588,7 +576,8 @@ pub mod mqtt {
         ));
         let (client, mut client_loop) = AsyncClient::new(mqtt_options, 100);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
-        let mut device = homie::SystemAirDevice::new(client, protocol, connection, command_rx);
+        let mut device =
+            homie::SystemAirDevice::new(client, protocol, connection, args.device_id, command_rx);
 
         {
             let mut publish_future = std::pin::pin!(device.publish_device());

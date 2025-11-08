@@ -1,7 +1,6 @@
-use crate::registers::{DataType, RegisterIndex, Value};
+use crate::registers::{DataType, Value};
 use homie5::device_description::{
-    FloatRange, HomiePropertyDescription, HomiePropertyFormat, IntegerRange,
-    PropertyDescriptionBuilder,
+    HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
 use homie5::HomieDataType;
 

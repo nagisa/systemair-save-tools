@@ -1,16 +1,15 @@
 mod alarm_node;
+mod clock_node;
 mod compensation_node;
 mod demand_control_node;
 mod fan_speed_setting_node;
-mod clock_node;
 mod node;
 mod value;
 
 use crate::connection::{self, Connection};
 use crate::homie::node::Node;
-use crate::homie::value::PropertyValue;
-use crate::modbus::{self, Operation, Request, Response, ResponseKind};
-use crate::modbus_device_cache::{ModbusDeviceValues, RegisterBitmask, SetBitsIterator};
+use crate::modbus::{self, Operation, Request, ResponseKind};
+use crate::modbus_device_cache::{ModbusDeviceValues, RegisterBitmask};
 use futures::stream::SelectAll;
 use futures::{Stream, StreamExt as _};
 use homie5::client::{Publish, QoS, Subscription};
@@ -20,8 +19,6 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -29,7 +26,7 @@ type ModbusReadStream = SelectAll<
     Pin<Box<dyn Send + Sync + Stream<Item = Result<(Operation, ResponseKind), connection::Error>>>>,
 >;
 
-pub struct SystemAirDevice {
+pub(crate) struct SystemAirDevice {
     mqtt: rumqttc::v5::AsyncClient,
     protocol: Homie5DeviceProtocol,
     state: HomieDeviceStatus,
@@ -37,16 +34,18 @@ pub struct SystemAirDevice {
     #[allow(unused)] // exists for its drop handler
     nodes: BTreeMap<HomieID, Box<dyn Node>>,
     modbus: Arc<Connection>,
+    modbus_device_id: u8,
     modbus_values: ModbusDeviceValues,
     modbus_read_stream: ModbusReadStream,
     commands: mpsc::UnboundedReceiver<Command>,
 }
 
 impl SystemAirDevice {
-    pub fn new(
+    pub(crate) fn new(
         mqtt: rumqttc::v5::AsyncClient,
         protocol: Homie5DeviceProtocol,
         modbus: Arc<Connection>,
+        modbus_device_id: u8,
         commands: mpsc::UnboundedReceiver<Command>,
     ) -> Self {
         let nodes = [
@@ -71,6 +70,7 @@ impl SystemAirDevice {
             commands,
             nodes,
             modbus,
+            modbus_device_id,
             modbus_values: ModbusDeviceValues::new(),
             modbus_read_stream: ModbusReadStream::new(),
         }
@@ -148,6 +148,7 @@ impl SystemAirDevice {
         let next_slot = Arc::new(Mutex::new(Instant::now()));
         let operation = Operation::GetHoldings { address, count };
         let modbus = Arc::clone(&self.modbus);
+        let device_id = self.modbus_device_id;
         let stream = futures::stream::repeat(()).then(move |()| {
             let modbus = Arc::clone(&modbus);
             let next_slot = Arc::clone(&next_slot);
@@ -160,7 +161,7 @@ impl SystemAirDevice {
                     let transaction_id = modbus.new_transaction_id();
                     let outcome = modbus
                         .send(Request {
-                            device_id: 1,
+                            device_id,
                             transaction_id,
                             operation,
                         })
@@ -375,7 +376,7 @@ impl SystemAirDevice {
         //         // Spawn maybe? Into the void perhaps?? And then publish a node event??
         //         self.modbus
         //             .send(Request {
-        //                 device_id: 1,
+        //                 device_id: self.modbus_device_id,
         //                 transaction_id,
         //                 operation,
         //             })
@@ -450,9 +451,6 @@ pub(crate) enum Command {
     Set {
         property: PropertyRef,
         value: String,
-    },
-    Reload {
-        property: PropertyRef,
     },
 }
 
