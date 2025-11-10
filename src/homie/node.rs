@@ -1,10 +1,15 @@
-use crate::homie::value::{DynPropertyValue, PropertyValue};
+use crate::connection::Connection;
+use crate::homie::value::{DynPropertyValue, PropertyValue, RegisterPropertyValue};
+use crate::homie::{EventResult, ModbusStream};
+use crate::modbus;
 use crate::modbus_device_cache::ModbusDeviceValues;
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
     FloatRange, HomieNodeDescription, HomiePropertyDescription, IntegerRange,
 };
 use homie5::{HomieDataType, HomieID};
+use std::pin::Pin;
+use std::sync::Arc;
 
 pub trait Node {
     /// The ID for this homie node.
@@ -12,12 +17,6 @@ pub trait Node {
     /// The Homie description for the node.
     fn description(&self) -> HomieNodeDescription;
     fn properties(&self) -> &[PropertyEntry];
-    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue>;
-    fn set_property_value(
-        &mut self,
-        property_index: usize,
-        value: Box<DynPropertyValue>,
-    ) -> Option<Box<DynPropertyValue>>;
 }
 
 pub(crate) enum PropertyKind {
@@ -28,6 +27,8 @@ pub(crate) enum PropertyKind {
         from_modbus: fn(Value) -> Result<Box<DynPropertyValue>, ()>,
         // FIXME: error handling
         from_homie: fn(&str) -> Result<Box<DynPropertyValue>, ()>,
+        // FIXME: error handling
+        to_modbus: fn(&DynPropertyValue) -> u16,
     },
     /// An action that node implements custom handling logic for.
     Action {
@@ -43,7 +44,7 @@ pub(crate) enum PropertyKind {
 impl PropertyKind {
     pub(crate) const fn new_register<T, E>(name: &str) -> Self
     where
-        T: PropertyValue + 'static,
+        T: PropertyValue + RegisterPropertyValue + 'static,
         T: TryFrom<Value, Error = ()>,
         T: for<'a> TryFrom<&'a str, Error = E>,
     {
@@ -57,6 +58,7 @@ impl PropertyKind {
                 let v = <T as TryFrom<&str>>::try_from(v).map_err(|_| ())?;
                 Ok(Box::new(v) as Box<DynPropertyValue>)
             },
+            to_modbus: |v| v.as_register_property_value().unwrap().to_modbus(),
         }
     }
 
@@ -92,6 +94,56 @@ impl PropertyKind {
             PropertyKind::Register { from_homie, .. }
             | PropertyKind::Action { from_homie }
             | PropertyKind::Aggregate { from_homie, .. } => from_homie(mqtt),
+        }
+    }
+
+    pub(crate) fn homie_set_to_modbus(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        device_id: u8,
+        value: Box<DynPropertyValue>,
+    ) -> Pin<Box<ModbusStream>> {
+        match *self {
+            PropertyKind::Register {
+                register,
+                to_modbus,
+                ..
+            } => Box::pin(futures::stream::once(async move {
+                let address = register.address();
+                let value = to_modbus(&*value);
+                let operation = modbus::Operation::SetHolding { address, value };
+                let request = modbus::Request {
+                    device_id,
+                    transaction_id: modbus.new_transaction_id(),
+                    operation: operation.clone(),
+                };
+                let response = modbus.send_retrying(request).await?;
+                if response.exception_code().is_some() {
+                    return Ok(EventResult::HomieSet {
+                        node_id,
+                        prop_idx,
+                        operation: operation.clone(),
+                        response: response.kind,
+                    });
+                }
+                let operation = modbus::Operation::GetHoldings { address, count: 1 };
+                let request = modbus::Request {
+                    device_id,
+                    transaction_id: modbus.new_transaction_id(),
+                    operation,
+                };
+                let response = modbus.send_retrying(request).await?;
+                return Ok(EventResult::HomieSet {
+                    node_id,
+                    prop_idx,
+                    operation,
+                    response: response.kind,
+                });
+            })) as _,
+            PropertyKind::Action { .. } => todo!(),
+            PropertyKind::Aggregate { .. } => todo!(),
         }
     }
 }
@@ -205,4 +257,5 @@ macro_rules! properties {
     };
 }
 
+use num_traits::MulAdd;
 pub(crate) use properties;

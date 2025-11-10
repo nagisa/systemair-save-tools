@@ -16,7 +16,7 @@
 // TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
 
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{DynPropertyValue, PropertyDescription, PropertyValue};
+use crate::homie::value::{DynPropertyValue, PropertyDescription, PropertyValue, RegisterPropertyValue};
 use crate::registers::Value;
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
@@ -65,15 +65,11 @@ super::node::properties! { static PROPERTIES = [
      { "summary-type-c": AlarmValue = register "ALARM_TYPE_C" },
 ] }
 
-pub struct AlarmNode {
-    values: [Option<Box<DynPropertyValue>>; PROPERTIES.len()],
-}
+pub struct AlarmNode {}
 
 impl AlarmNode {
     pub fn new() -> Self {
-        Self {
-            values: [const { None }; PROPERTIES.len()],
-        }
+        Self {}
     }
 }
 
@@ -96,18 +92,6 @@ impl Node for AlarmNode {
     fn properties(&self) -> &'static [super::node::PropertyEntry] {
         &PROPERTIES
     }
-
-    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue> {
-        self.values[property_index].as_deref()
-    }
-
-    fn set_property_value(
-        &mut self,
-        property_index: usize,
-        value: Box<DynPropertyValue>,
-    ) -> Option<Box<DynPropertyValue>> {
-        self.values[property_index].replace(value)
-    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, strum::FromRepr, strum::EnumString)]
@@ -128,10 +112,6 @@ impl TryFrom<Value> for AlarmValue {
 }
 
 impl PropertyValue for AlarmValue {
-    fn modbus(&self) -> Value {
-        unreachable!("alarm values are not writable, this should not be reachable")
-    }
-
     fn value(&self) -> String {
         match self {
             AlarmValue::Clear | AlarmValue::Evaluating => "clear",
@@ -148,6 +128,14 @@ impl PropertyValue for AlarmValue {
             }
             .to_string(),
         )
+    }
+}
+
+impl RegisterPropertyValue for AlarmValue {
+    fn to_modbus(&self) -> u16 {
+        // TODO: maybe actually implement this via the clear register? But then this is not a
+        // `RegisterPropertyValue`.
+        unreachable!("alarms should not be writable")
     }
 }
 

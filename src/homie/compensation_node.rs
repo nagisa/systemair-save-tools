@@ -16,15 +16,11 @@ super::node::properties! { static PROPERTIES = [
      { "max-when-summer": UintValue = register "FAN_OUTDOOR_COMP_VALUE_SUMMER" },
 ] }
 
-pub struct CompensationNode {
-    values: [Option<Box<DynPropertyValue>>; PROPERTIES.len()],
-}
+pub struct CompensationNode {}
 
 impl CompensationNode {
     pub(crate) fn new() -> Self {
-        Self {
-            values: [const { None }; PROPERTIES.len()],
-        }
+        Self {}
     }
 }
 
@@ -46,18 +42,6 @@ impl Node for CompensationNode {
 
     fn properties(&self) -> &'static [super::node::PropertyEntry] {
         &PROPERTIES
-    }
-
-    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue> {
-        self.values[property_index].as_deref()
-    }
-
-    fn set_property_value(
-        &mut self,
-        property_index: usize,
-        value: Box<DynPropertyValue>,
-    ) -> Option<Box<DynPropertyValue>> {
-        self.values[property_index].replace(value)
     }
 }
 

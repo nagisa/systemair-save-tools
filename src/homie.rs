@@ -8,6 +8,7 @@ mod value;
 
 use crate::connection::{self, Connection};
 use crate::homie::node::Node;
+use crate::homie::value::DynPropertyValue;
 use crate::modbus::{self, Operation, Request, ResponseKind};
 use crate::modbus_device_cache::{ModbusDeviceValues, RegisterBitmask};
 use futures::stream::SelectAll;
@@ -35,8 +36,9 @@ pub enum EventResult {
     },
 }
 
-type ModbusReadStream =
-    SelectAll<Pin<Box<dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>>>>;
+type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
+
+type ModbusReadStream = SelectAll<Pin<Box<ModbusStream>>>;
 
 pub(crate) struct SystemAirDevice {
     mqtt: rumqttc::v5::AsyncClient,
@@ -155,54 +157,42 @@ impl SystemAirDevice {
     }
 
     fn schedule_periodic_read(&mut self, address: u16, count: u16, period: Duration) {
-        use std::sync::Mutex;
-        let next_slot = Arc::new(Mutex::new(Instant::now()));
         let operation = Operation::GetHoldings { address, count };
         let modbus = Arc::clone(&self.modbus);
         let device_id = self.modbus_device_id;
-        let stream = futures::stream::repeat(()).then(move |()| {
+        let stream = futures::stream::unfold(Instant::now(), move |when| {
             let modbus = Arc::clone(&modbus);
-            let next_slot = Arc::clone(&next_slot);
             let transaction_id = modbus.new_transaction_id();
             async move {
-                loop {
-                    {
-                        let timeout = *next_slot.lock().unwrap_or_else(|e| e.into_inner());
-                        tokio::time::sleep_until(timeout).await;
-                    }
-                    let outcome = modbus
-                        .send(Request {
-                            device_id,
-                            transaction_id,
-                            operation,
-                        })
-                        .await?;
-                    let Some(result) = outcome else {
-                        continue;
-                    };
-                    let mut next_slot = next_slot.lock().unwrap_or_else(|e| e.into_inner());
-                    if result.is_server_busy() {
-                        // IAM was busy with other requests. Give it some time…
-                        // TODO: maybe add a flag to control this?
-                        // TODO: configurable retry sleep time?
-                        *next_slot = Instant::now() + Duration::from_millis(25);
-                        continue;
-                    }
-                    *next_slot = Instant::now() + period;
-                    let result = EventResult::Periodic {
-                        operation,
-                        response: result.kind,
-                    };
-                    return Ok::<_, connection::Error>(result);
-                }
+                tokio::time::sleep_until(when).await;
+                let request = Request {
+                    device_id,
+                    transaction_id,
+                    operation,
+                };
+                let response = match modbus.send_retrying(request).await {
+                    Ok(r) => r,
+                    Err(e) => return Some((Err(e), when + period)),
+                };
+                let result = EventResult::Periodic {
+                    operation,
+                    response: response.kind,
+                };
+                Some((Ok(result), when + period))
             }
         });
         self.event_stream.push(Box::pin(stream));
     }
 
-    async fn handle_value_change(&mut self, node_id: &HomieID, prop_idx: usize) -> Result<(), ()> {
+    async fn handle_value_change(
+        &mut self,
+        node_id: &HomieID,
+        prop_idx: usize,
+        new: &DynPropertyValue,
+    ) -> Result<(), ()> {
         let node = self.nodes.get(node_id).unwrap();
-        let prop_id = &node.properties()[prop_idx].prop_id;
+        let prop = &node.properties()[prop_idx];
+        let prop_id = &prop.prop_id;
         let Some(pd) = self.description.get_property_by_id(node_id, prop_id) else {
             tracing::warn!(
                 ?node_id,
@@ -211,10 +201,7 @@ impl SystemAirDevice {
             );
             return Ok(());
         };
-        let val = node
-            .property_value(prop_idx)
-            .map(|v| v.value())
-            .unwrap_or_default();
+        let val = new.value();
         let msg = self
             .protocol
             .publish_value(node_id, prop_id, val, pd.retained);
@@ -222,9 +209,15 @@ impl SystemAirDevice {
         Ok(())
     }
 
-    async fn handle_target_change(&mut self, node_id: &HomieID, prop_idx: usize) -> Result<(), ()> {
+    async fn handle_target_change(
+        &mut self,
+        node_id: &HomieID,
+        prop_idx: usize,
+        new: &DynPropertyValue,
+    ) -> Result<(), ()> {
         let node = self.nodes.get(node_id).unwrap();
-        let prop_id = &node.properties()[prop_idx].prop_id;
+        let prop = &node.properties()[prop_idx];
+        let prop_id = &prop.prop_id;
         let Some(pd) = self.description.get_property_by_id(node_id, &prop_id) else {
             tracing::warn!(
                 ?node_id,
@@ -233,7 +226,7 @@ impl SystemAirDevice {
             );
             return Ok(());
         };
-        let Some(tgt) = node.property_value(prop_idx).and_then(|v| v.target()) else {
+        let Some(tgt) = new.target() else {
             return Ok(());
         };
         let msg = self
@@ -249,81 +242,86 @@ impl SystemAirDevice {
         values: Vec<u8>,
         inhibit_change_handling: bool,
     ) -> Result<(), ()> {
-        let mut changed_registers = RegisterBitmask::new();
+        // This is somewhat awkward to write as we want our nodes to see a full atomic change to
+        // the register value view, but we also want to have the old values to compare against.
+        // For that reason the updates to our cached view of the modbus registers occurs after we
+        // compute old property values with the unmodified map. We could simplify the code by
+        // cloning the register values, but its a full 128kB clone!
+        let mut changing_registers = RegisterBitmask::new();
         let (chunks, remainder) = values.as_chunks::<2>();
         if !remainder.is_empty() {
-            tracing::warn!("response contains non-even number of bytes, modbus is misbehaving");
+            tracing::warn!("response contains non-even number of bytes, modbus is misbehaving?");
         }
         for (word, address) in chunks.iter().zip(address..) {
             let word = u16::from_be_bytes(*word);
-            if self.modbus_values.set_value(address, word) {
-                changed_registers.set(address);
+            if self.modbus_values.value_of_address(address) != Some(word) {
+                changing_registers.set(address);
             }
         }
-
-        let mut changes = vec![];
-        'next_node: for (node_id, node) in &mut self.nodes {
-            for property in node.properties() {
-                'next_register: for register in property.kind.registers() {
-                    if !changed_registers.is_set(register.address()) {
-                        continue 'next_register;
+        let mut property_values = Vec::new();
+        for (node_id, node) in &self.nodes {
+            for (prop_idx, property) in node.properties().iter().enumerate() {
+                for register in property.kind.registers() {
+                    let address = register.address();
+                    if !changing_registers.is_set(address) {
+                        continue;
                     }
+                    let prop_id = &property.prop_id;
                     tracing::debug!(
                         %node_id,
-                        address = register.address(),
-                        "register change reloads node"
+                        %prop_id,
+                        address,
+                        "register change reloads node property"
                     );
-                    for (prop_idx, property) in node.properties().iter().enumerate() {
-                        let old = node.property_value(prop_idx);
-                        let new = property.kind.value_from_modbus(&self.modbus_values);
-                        let node_id = node_id.clone();
-                        let prop_id = &property.prop_id;
-                        match (old, new) {
-                            (None, None) => continue,
-                            (Some(_), None) => todo!("erasing a value??"),
-                            (_, Some(Err(error))) => {
-                                tracing::debug!(
-                                    %prop_id,
-                                    ?error,
-                                    "could not parse property from device"
-                                );
-                            }
-                            (None, Some(Ok(new))) => {
-                                let target_changed = new.target().is_some();
-                                changes.push((node_id, prop_idx, new, true, target_changed));
-                            }
-                            (Some(old), Some(Ok(new))) => {
-                                let value = new.value();
-                                let target = new.target();
-                                let val_changed = value != old.value();
-                                let tgt_changed = target.is_some() && target != old.target();
-                                if val_changed || tgt_changed {
-                                    tracing::debug!(%prop_id, "property changed");
-                                    changes.push((
-                                        node_id,
-                                        prop_idx,
-                                        new,
-                                        val_changed,
-                                        tgt_changed,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    continue 'next_node;
+                    let old = property.kind.value_from_modbus(&self.modbus_values);
+                    property_values.push((node_id.clone(), prop_idx, old));
                 }
             }
         }
-        for (node_id, prop_idx, value, value_changed, target_changed) in changes {
-            self.nodes
-                .get_mut(&node_id)
-                .unwrap()
-                .set_property_value(prop_idx, value);
-            if !inhibit_change_handling && value_changed {
-                self.handle_value_change(&node_id, prop_idx).await?;
-            }
-            if !inhibit_change_handling && target_changed {
-                self.handle_target_change(&node_id, prop_idx).await?;
+        for (word, address) in chunks.iter().zip(address..) {
+            let word = u16::from_be_bytes(*word);
+            self.modbus_values.set_value(address, word);
+        }
+        for (node_id, prop_idx, old) in property_values {
+            let node = self.nodes.get(&node_id).unwrap();
+            let prop = &node.properties()[prop_idx];
+            let new = prop.kind.value_from_modbus(&self.modbus_values);
+            let (value_changed, target_changed, new) = match (old, new) {
+                (None, None) => (false, false, None),
+                (Some(_), None) => todo!("erasing a value??"),
+                (_, Some(Err(error))) => {
+                    tracing::debug!(
+                        %node_id,
+                        prop_id = %prop.prop_id,
+                        ?error,
+                        "could not parse property from device"
+                    );
+                    (false, false, None)
+                }
+                (None, Some(Ok(new))) => (true, new.target().is_some(), Some(new)),
+                (Some(Err(error)), Some(Ok(new))) => {
+                    tracing::debug!(
+                        %node_id,
+                        prop_id = %prop.prop_id,
+                        ?error,
+                        "could not parse old property from device"
+                    );
+                    (true, new.target().is_some(), Some(new))
+                }
+                (Some(Ok(old)), Some(Ok(new))) => {
+                    let value_changed = old.value() != new.value();
+                    let new_target = new.target();
+                    let target_changed = new_target.is_some() && new_target != old.target();
+                    (value_changed, target_changed, Some(new))
+                }
+            };
+            if let Some(new) = new {
+                if !inhibit_change_handling && value_changed {
+                    self.handle_value_change(&node_id, prop_idx, &*new).await?;
+                }
+                if !inhibit_change_handling && target_changed {
+                    self.handle_target_change(&node_id, prop_idx, &*new).await?;
+                }
             }
         }
         Ok(())
@@ -353,75 +351,22 @@ impl SystemAirDevice {
                 };
                 let prop_id = property.prop_id.clone();
                 let Ok(value) = property.kind.value_from_homie(&value) else {
-                    tracing::warn!(%node_id, %prop_id, value, "set value could not be parsed");
-                    self.handle_target_change(&node_id, prop_idx).await?;
-                    self.handle_value_change(&node_id, prop_idx).await?;
+                    tracing::warn!(%node_id, %prop_id, value, "property/set could not be parsed");
+                    let Some(Ok(old)) = property.kind.value_from_modbus(&self.modbus_values) else {
+                        return Ok(());
+                    };
+                    self.handle_target_change(&node_id, prop_idx, &*old).await?;
+                    self.handle_value_change(&node_id, prop_idx, &*old).await?;
                     return Ok(());
                 };
-                match property.kind {
-                    node::PropertyKind::Register { register, .. } => {
-                        let modbus = Arc::clone(&self.modbus);
-                        let device_id = self.modbus_device_id;
-                        let transaction_id = self.modbus.new_transaction_id();
-                        self.event_stream
-                            .push(Box::pin(futures::stream::once(async move {
-                                loop {
-                                    let address = register.address();
-                                    // FIXME: this should probably generate modbus operations
-                                    // straight away thus supporting aggregate values.
-                                    let value = value.modbus().into_inner();
-                                    let operation = Operation::SetHolding { address, value };
-                                    let response = modbus
-                                        .send(Request {
-                                            device_id,
-                                            transaction_id,
-                                            operation,
-                                        })
-                                        .await?;
-                                    let Some(response) = response else { continue };
-                                    if response.exception_code().is_none() {
-                                        tracing::debug!(%node_id, %prop_id, value, "property set");
-                                        break;
-                                    } else if response.is_server_busy() {
-                                        continue;
-                                    } else {
-                                        return Ok(EventResult::HomieSet {
-                                            node_id,
-                                            prop_idx,
-                                            operation,
-                                            response: response.kind,
-                                        });
-                                    }
-                                }
-                                loop {
-                                    let operation = Operation::GetHoldings {
-                                        address: register.address(),
-                                        count: 1,
-                                    };
-                                    let response = modbus
-                                        .send(Request {
-                                            device_id,
-                                            transaction_id,
-                                            operation,
-                                        })
-                                        .await?;
-                                    let Some(response) = response else { continue };
-                                    if response.is_server_busy() {
-                                        continue;
-                                    } else {
-                                        return Ok(EventResult::HomieSet {
-                                            node_id,
-                                            prop_idx,
-                                            operation,
-                                            response: response.kind,
-                                        });
-                                    }
-                                }
-                            })));
-                    }
-                    node::PropertyKind::Action { .. } => {}
-                    node::PropertyKind::Aggregate { .. } => {}
-                }
+                let task = property.kind.homie_set_to_modbus(
+                    node_id,
+                    prop_idx,
+                    Arc::clone(&self.modbus),
+                    self.modbus_device_id,
+                    value,
+                );
+                self.event_stream.push(task);
             }
         }
         Ok(())
@@ -466,9 +411,16 @@ impl SystemAirDevice {
                 response: ResponseKind::ErrorCode(code),
             } => {
                 tracing::error!(code, ?operation, "modbus server exception occurred");
-                let r1 = self.handle_target_change(&node_id, prop_idx).await;
-                let r2 = self.handle_value_change(&node_id, prop_idx).await;
-                r1.and(r2)?;
+                let node = self.nodes.get(&node_id).unwrap();
+                let prop = &node.properties()[prop_idx];
+                if let Some(Ok(old)) = prop.kind.value_from_modbus(&self.modbus_values) {
+                    let r1 = self.handle_target_change(&node_id, prop_idx, &*old).await;
+                    let r2 = self.handle_value_change(&node_id, prop_idx, &*old).await;
+                    r1.and(r2)?;
+                } else {
+                    let prop_id = &prop.prop_id;
+                    tracing::debug!(%node_id, %prop_id, "failed to parse old value from modbus");
+                }
             }
             EventResult::HomieSet {
                 node_id,
@@ -479,9 +431,16 @@ impl SystemAirDevice {
                 let r1 = self
                     .handle_modbus_register_response(address, values, true)
                     .await;
-                let r2 = self.handle_target_change(&node_id, prop_idx).await;
-                let r3 = self.handle_value_change(&node_id, prop_idx).await;
-                r1.and(r2).and(r3)?;
+                let node = self.nodes.get(&node_id).unwrap();
+                let prop = &node.properties()[prop_idx];
+                if let Some(Ok(new)) = prop.kind.value_from_modbus(&self.modbus_values) {
+                    let r2 = self.handle_target_change(&node_id, prop_idx, &*new).await;
+                    let r3 = self.handle_value_change(&node_id, prop_idx, &*new).await;
+                    r1.and(r2).and(r3)?;
+                } else {
+                    let prop_id = &prop.prop_id;
+                    tracing::debug!(%node_id, %prop_id, "failed to parse set value from modbus");
+                }
             }
             EventResult::Periodic { .. } => unreachable!("EventResult::Periodic"),
             EventResult::HomieSet { .. } => unreachable!("EventResult::HomieSet"),

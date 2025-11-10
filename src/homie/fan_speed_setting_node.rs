@@ -81,15 +81,11 @@ super::node::properties! { static PROPERTIES = [
     { "during-inactive-week-schedule": WeeklyScheduleLevel = register "WS_FAN_LEVEL_UNSCHEDULED" },
 ] }
 
-pub struct FanSpeedSettingsNode {
-    values: [Option<Box<DynPropertyValue>>; PROPERTIES.len()],
-}
+pub struct FanSpeedSettingsNode {}
 
 impl FanSpeedSettingsNode {
     pub(crate) fn new() -> Self {
-        Self {
-            values: [const { None }; PROPERTIES.len()],
-        }
+        Self {}
     }
 }
 
@@ -112,18 +108,6 @@ impl Node for FanSpeedSettingsNode {
 
     fn properties(&self) -> &'static [super::node::PropertyEntry] {
         &PROPERTIES
-    }
-
-    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue> {
-        self.values[property_index].as_deref()
-    }
-
-    fn set_property_value(
-        &mut self,
-        property_index: usize,
-        value: Box<DynPropertyValue>,
-    ) -> Option<Box<DynPropertyValue>> {
-        self.values[property_index].replace(value)
     }
 }
 

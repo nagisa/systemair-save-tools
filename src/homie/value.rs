@@ -27,14 +27,24 @@ pub(crate) fn homie_enum<T: strum::VariantNames + strum::VariantArray + num_trai
 }
 
 pub(crate) trait PropertyValue: Send + Sync {
-    fn modbus(&self) -> Value;
     fn value(&self) -> String;
     fn target(&self) -> Option<String> {
+        None
+    }
+    fn as_register_property_value(&self) -> Option<&dyn RegisterPropertyValue> {
         None
     }
 }
 
 pub(crate) type DynPropertyValue = dyn Send + Sync + PropertyValue;
+
+/// [`PropertyValue`] types that directly correspond to a modbus register.
+///
+/// This means that these can directly produce a `Value` instead of more complicated concepts when
+/// writeback of them is initiated.
+pub(crate) trait RegisterPropertyValue: Send + Sync {
+    fn to_modbus(&self) -> u16;
+}
 
 pub(crate) trait PropertyDescription {
     fn description(prop: &PropertyEntry) -> HomiePropertyDescription;
@@ -59,11 +69,13 @@ impl TryFrom<&str> for BooleanValue {
     }
 }
 impl PropertyValue for BooleanValue {
-    fn modbus(&self) -> Value {
-        Value::U16(self.0 as u16)
-    }
     fn value(&self) -> String {
         self.0.to_string()
+    }
+}
+impl RegisterPropertyValue for BooleanValue {
+    fn to_modbus(&self) -> u16 {
+        self.0 as u16
     }
 }
 
@@ -81,9 +93,6 @@ impl TryFrom<&str> for UintValue {
     }
 }
 impl PropertyValue for UintValue {
-    fn modbus(&self) -> Value {
-        Value::U16(self.0 as u16)
-    }
     fn value(&self) -> String {
         self.0.to_string()
     }
@@ -91,6 +100,11 @@ impl PropertyValue for UintValue {
 impl PropertyDescription for UintValue {
     fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
         PropertyDescriptionBuilder::new(HomieDataType::Integer).build()
+    }
+}
+impl RegisterPropertyValue for UintValue {
+    fn to_modbus(&self) -> u16 {
+        self.0
     }
 }
 
@@ -109,11 +123,13 @@ impl TryFrom<&str> for CelsiusValue {
     }
 }
 impl PropertyValue for CelsiusValue {
-    fn modbus(&self) -> Value {
-        Value::U16(self.0 as u16)
-    }
     fn value(&self) -> String {
         (self.0 as f32 / DataType::CEL.scale() as f32).to_string()
+    }
+}
+impl RegisterPropertyValue for CelsiusValue {
+    fn to_modbus(&self) -> u16 {
+        self.0 as u16
     }
 }
 impl PropertyDescription for CelsiusValue {
@@ -153,11 +169,19 @@ macro_rules! string_enum {
         }
 
         impl $crate::homie::value::PropertyValue for $name {
-            fn modbus(&self) -> crate::registers::Value {
-                crate::registers::Value::U16(*self as u16)
-            }
             fn value(&self) -> String {
                 <&'static str>::from(self).to_string()
+            }
+            fn as_register_property_value(&self)
+            -> Option<&dyn $crate::homie::value::RegisterPropertyValue>
+            {
+                Some(&*self)
+            }
+        }
+
+        impl $crate::homie::value::RegisterPropertyValue for $name {
+            fn to_modbus(&self) -> u16 {
+                *self as u16
             }
         }
 

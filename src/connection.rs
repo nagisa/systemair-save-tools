@@ -179,6 +179,23 @@ impl Connection {
             .map_err(Error::ScheduleRequest)?;
         Ok(self.response_tracker.wait_for(transaction_id).await)
     }
+
+    /// [`send`] but retries timeouts and `Server Busy` exceptions.
+    pub async fn send_retrying(&self, request: Request) -> Result<Response, Error> {
+        loop {
+            let response = self.send(request).await?;
+            let Some(response) = response else { continue };
+            if response.is_server_busy() {
+                // IAM was busy with other requests. Give it some time…
+                // TODO: maybe add a flag to control this?
+                // TODO: configurable retry sleep time?
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                continue;
+            } else {
+                break Ok(response);
+            }
+        }
+    }
 }
 
 struct TcpWorker {

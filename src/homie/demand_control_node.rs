@@ -31,15 +31,11 @@ super::node::properties! { static PROPERTIES = [
     { "current-indoor-air-quality-level": IaqLevel = register "IAQ_LEVEL" },
 ] }
 
-pub struct DemandControlNode {
-    values: [Option<Box<DynPropertyValue>>; PROPERTIES.len()],
-}
+pub struct DemandControlNode {}
 
 impl DemandControlNode {
     pub fn new() -> Self {
-        Self {
-            values: [const { None }; PROPERTIES.len()],
-        }
+        Self {}
     }
 }
 
@@ -60,16 +56,6 @@ impl Node for DemandControlNode {
     }
     fn properties(&self) -> &'static [super::node::PropertyEntry] {
         &PROPERTIES
-    }
-    fn property_value(&self, property_index: usize) -> Option<&DynPropertyValue> {
-        self.values[property_index].as_deref()
-    }
-    fn set_property_value(
-        &mut self,
-        property_index: usize,
-        value: Box<DynPropertyValue>,
-    ) -> Option<Box<DynPropertyValue>> {
-        self.values[property_index].replace(value)
     }
 }
 

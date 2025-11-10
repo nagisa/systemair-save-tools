@@ -2,6 +2,7 @@ use tokio_util::bytes::Buf;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::trace;
 
+use crate::connection::Connection;
 use crate::registers::{RegisterIndex, Value};
 
 pub const MAX_SAFE_READ_COUNT: u16 = 123;
