@@ -144,7 +144,6 @@ impl ActionPropertyValue for SynchronizeClockValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-        device_id: u8,
     ) -> std::pin::Pin<Box<super::ModbusStream>> {
         Box::pin(async_stream::stream! {
             let system_tz = jiff::tz::TimeZone::system();
@@ -160,12 +159,7 @@ impl ActionPropertyValue for SynchronizeClockValue {
                     time.second() as u16,
                 ];
                 let operation = modbus::Operation::SetHoldings { address, values };
-                let request = modbus::Request {
-                    device_id,
-                    transaction_id: modbus.new_transaction_id(),
-                    operation: operation.clone(),
-                };
-                let response = modbus.send(request).await?;
+                let response = modbus.send(operation.clone()).await?;
                 let Some(response) = response else { continue };
                 if response.is_server_busy() {
                     tokio::time::sleep(Duration::from_millis(25)).await;
@@ -181,12 +175,7 @@ impl ActionPropertyValue for SynchronizeClockValue {
             // immediately after setting time reload the clock so it also gets reported straight
             // away.
             let operation = modbus::Operation::GetHoldings { address, count: 6 };
-            let request = modbus::Request {
-                device_id,
-                transaction_id: modbus.new_transaction_id(),
-                operation: operation.clone()
-            };
-            let response = modbus.send_retrying(request).await?.kind;
+            let response = modbus.send_retrying(operation.clone()).await?.kind;
             let prop_idx = 0;
             assert_eq!(PROPERTIES[prop_idx].prop_id.as_str(), "clock");
             yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });

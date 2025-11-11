@@ -9,7 +9,7 @@ mod value;
 use crate::connection::{self, Connection};
 use crate::homie::node::Node;
 use crate::homie::value::DynPropertyValue;
-use crate::modbus::{self, Operation, Request, ResponseKind};
+use crate::modbus::{self, Operation, ResponseKind};
 use crate::modbus_device_cache::{ModbusDeviceValues, RegisterBitmask};
 use futures::stream::SelectAll;
 use futures::{Stream, StreamExt as _};
@@ -23,7 +23,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-pub enum EventResult {
+pub(crate) enum EventResult {
     Periodic {
         operation: Operation,
         response: ResponseKind,
@@ -52,7 +52,6 @@ pub(crate) struct SystemAirDevice {
     description: HomieDeviceDescription,
     nodes: BTreeMap<HomieID, Box<dyn Node>>,
     modbus: Arc<Connection>,
-    modbus_device_id: u8,
     modbus_values: ModbusDeviceValues,
     event_stream: ModbusReadStream,
     commands: mpsc::UnboundedReceiver<Command>,
@@ -63,7 +62,6 @@ impl SystemAirDevice {
         mqtt: rumqttc::v5::AsyncClient,
         protocol: Homie5DeviceProtocol,
         modbus: Arc<Connection>,
-        modbus_device_id: u8,
         commands: mpsc::UnboundedReceiver<Command>,
     ) -> Self {
         let nodes = [
@@ -88,7 +86,6 @@ impl SystemAirDevice {
             commands,
             nodes,
             modbus,
-            modbus_device_id,
             modbus_values: ModbusDeviceValues::new(),
             event_stream: ModbusReadStream::new(),
         }
@@ -163,19 +160,12 @@ impl SystemAirDevice {
 
     fn schedule_periodic_read(&mut self, address: u16, count: u16, period: Duration) {
         let modbus = Arc::clone(&self.modbus);
-        let device_id = self.modbus_device_id;
         let stream = futures::stream::unfold(Instant::now(), move |when| {
             let modbus = Arc::clone(&modbus);
-            let transaction_id = modbus.new_transaction_id();
             async move {
                 let operation = Operation::GetHoldings { address, count };
                 tokio::time::sleep_until(when).await;
-                let request = Request {
-                    device_id,
-                    transaction_id,
-                    operation: operation.clone(),
-                };
-                let response = match modbus.send_retrying(request).await {
+                let response = match modbus.send_retrying(operation.clone()).await {
                     Ok(r) => r,
                     Err(e) => return Some((Err(e), when + period)),
                 };
@@ -370,7 +360,6 @@ impl SystemAirDevice {
                     node_id,
                     prop_idx,
                     Arc::clone(&self.modbus),
-                    self.modbus_device_id,
                     value,
                 );
                 self.event_stream.push(task);

@@ -33,7 +33,6 @@ pub(crate) trait PropertyKind: Send + Sync {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-        device_id: u8,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>>;
     fn adjust_description(&self, description: &mut HomiePropertyDescription);
@@ -72,7 +71,6 @@ where
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-        device_id: u8,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>> {
         tracing::warn!("here?!");
@@ -84,12 +82,7 @@ where
         Box::pin(futures::stream::once(async move {
             tracing::warn!("setting!");
             let operation = modbus::Operation::SetHoldings { address, values };
-            let request = modbus::Request {
-                device_id,
-                transaction_id: modbus.new_transaction_id(),
-                operation: operation.clone(),
-            };
-            let response = modbus.send_retrying(request).await?;
+            let response = modbus.send_retrying(operation.clone()).await?;
             if response.exception_code().is_some() {
                 return Ok(EventResult::HomieSet {
                     node_id,
@@ -99,12 +92,7 @@ where
                 });
             }
             let operation = modbus::Operation::GetHoldings { address, count: 1 };
-            let request = modbus::Request {
-                device_id,
-                transaction_id: modbus.new_transaction_id(),
-                operation: operation.clone(),
-            };
-            let response = modbus.send_retrying(request).await?;
+            let response = modbus.send_retrying(operation.clone()).await?;
             return Ok(EventResult::HomieSet {
                 node_id,
                 prop_idx,
@@ -187,7 +175,6 @@ where
         _node_id: HomieID,
         _prop_idx: usize,
         _modbus: Arc<Connection>,
-        _device_id: u8,
         _value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>> {
         todo!()
@@ -228,13 +215,12 @@ where
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-        device_id: u8,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>> {
         let value = (value as Box<dyn std::any::Any>)
             .downcast::<T>()
             .expect("type confusion");
-        value.invoke(node_id, prop_idx, modbus, device_id)
+        value.invoke(node_id, prop_idx, modbus)
     }
 
     fn adjust_description(&self, description: &mut HomiePropertyDescription) {

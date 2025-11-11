@@ -5,7 +5,6 @@ use std::sync::Arc;
 use crate::connection::Connection;
 use crate::homie::node::PropertyEntry;
 use crate::homie::ModbusStream;
-use crate::modbus;
 use crate::registers::{DataType, Value};
 use homie5::device_description::{
     HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
@@ -54,7 +53,6 @@ pub(crate) trait ActionPropertyValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-        device_id: u8,
     ) -> Pin<Box<ModbusStream>>;
 }
 

@@ -1,4 +1,4 @@
-use crate::modbus::{ModbusTCPCodec, Request, Response};
+use crate::modbus::{self, ModbusTCPCodec};
 use futures::{SinkExt, StreamExt as _};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ pub enum Error {
     #[error("could not open {1:?} for reading and writing")]
     OpenDevice(#[source] std::io::Error, PathBuf),
     #[error("scheduling a request failed")]
-    ScheduleRequest(#[source] SendError<Request>),
+    ScheduleRequest(#[source] SendError<modbus::Request>),
     #[error("could not read data from the stream")]
     Receive(#[source] std::io::Error),
     #[error("could not shut down the connection")]
@@ -51,7 +51,7 @@ impl AsyncRW for tokio::fs::File {
 
 #[derive(Default)]
 pub struct ResponseTracker {
-    responses: Mutex<BTreeMap<u16, Option<Response>>>,
+    responses: Mutex<BTreeMap<u16, Option<modbus::Response>>>,
     change_notify: Notify,
 }
 
@@ -63,14 +63,14 @@ impl ResponseTracker {
         drop(guard);
     }
 
-    pub fn add_response(&self, response: Response) {
+    pub fn add_response(&self, response: modbus::Response) {
         let mut guard = self.responses.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(response.transaction_id, Some(response));
         self.change_notify.notify_waiters();
         drop(guard);
     }
 
-    pub async fn wait_for(&self, transaction_id: u16) -> Option<Response> {
+    pub async fn wait_for(&self, transaction_id: u16) -> Option<modbus::Response> {
         loop {
             self.change_notify.notified().await;
             let mut guard = self.responses.lock().unwrap_or_else(|e| e.into_inner());
@@ -117,19 +117,24 @@ pub struct ConnectionGroup {
     /// Connect to the SystemAIR device over Serial Modbus RTU.
     #[arg(long, short = 'd')]
     device: Option<PathBuf>,
+    /// The modbus device ID.
+    #[arg(long, short = 'i')]
+    device_id: u8,
 }
 
 pub struct Connection {
-    pub request_queue: tokio::sync::mpsc::UnboundedSender<Request>,
+    pub request_queue: tokio::sync::mpsc::UnboundedSender<modbus::Request>,
     pub worker: tokio::task::JoinHandle<Result<(), Error>>,
     pub response_tracker: Arc<ResponseTracker>,
     transaction_id_generator: std::sync::atomic::AtomicU16,
+    device_id: u8,
 }
 
 impl Connection {
     pub async fn new(args: Args) -> Result<Connection, Error> {
         let (request_queue, jobs) = tokio::sync::mpsc::unbounded_channel();
         let response_tracker = Default::default();
+        let device_id = args.how.device_id;
         let worker = if args.how.tcp.is_some() {
             TcpWorker {
                 reconnect_countdown: args.reconnect_after_timeouts,
@@ -148,6 +153,7 @@ impl Connection {
             worker,
             response_tracker,
             transaction_id_generator: AtomicU16::new(0),
+            device_id,
         })
     }
 
@@ -172,18 +178,29 @@ impl Connection {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub async fn send(&self, request: Request) -> Result<Option<Response>, Error> {
-        let transaction_id = request.transaction_id;
+    pub async fn send(
+        &self,
+        operation: modbus::Operation,
+    ) -> Result<Option<modbus::Response>, Error> {
+        let transaction_id = self.new_transaction_id();
+        let request = modbus::Request {
+            device_id: self.device_id,
+            transaction_id,
+            operation,
+        };
         self.request_queue
             .send(request)
             .map_err(Error::ScheduleRequest)?;
         Ok(self.response_tracker.wait_for(transaction_id).await)
     }
 
-    /// [`send`] but retries timeouts and `Server Busy` exceptions.
-    pub async fn send_retrying(&self, request: Request) -> Result<Response, Error> {
+    /// [`Self::send`] but retries timeouts and `Server Busy` exceptions.
+    pub async fn send_retrying(
+        &self,
+        operation: modbus::Operation,
+    ) -> Result<modbus::Response, Error> {
         loop {
-            let response = self.send(request.clone()).await?;
+            let response = self.send(operation.clone()).await?;
             let Some(response) = response else { continue };
             if response.is_server_busy() {
                 // IAM was busy with other requests. Give it some time…
@@ -238,11 +255,17 @@ type TcpIo = Framed<TcpStream, ModbusTCPCodec>;
 type PinnedSleep<'a> = pin::Pin<&'a mut tokio::time::Sleep>;
 
 impl TcpWorker {
-    fn spawn(self, jobs: UnboundedReceiver<Request>) -> tokio::task::JoinHandle<Result<(), Error>> {
+    fn spawn(
+        self,
+        jobs: UnboundedReceiver<modbus::Request>,
+    ) -> tokio::task::JoinHandle<Result<(), Error>> {
         tokio::task::spawn(self.main_loop(jobs))
     }
 
-    async fn main_loop(mut self, mut jobs: UnboundedReceiver<Request>) -> Result<(), Error> {
+    async fn main_loop(
+        mut self,
+        mut jobs: UnboundedReceiver<modbus::Request>,
+    ) -> Result<(), Error> {
         'reconnect: loop {
             // If we are reconnecting and had any in-flight requests, it is only proper to report
             // them as timed out.
@@ -327,7 +350,7 @@ impl TcpWorker {
 
     async fn send(
         &mut self,
-        request: Request,
+        request: modbus::Request,
         io: &mut TcpIo,
         send_time: PinnedSleep<'_>,
         request_timeout: PinnedSleep<'_>,
@@ -350,7 +373,7 @@ impl TcpWorker {
 
     fn handle_response(
         &mut self,
-        response: Response,
+        response: modbus::Response,
         send_time: pin::Pin<&mut tokio::time::Sleep>,
     ) {
         trace!(

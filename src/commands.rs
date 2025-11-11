@@ -135,7 +135,7 @@ pub mod registers {
 
 pub mod read {
     use crate::connection::{self, Connection};
-    use crate::modbus::{Operation, Request, ResponseKind};
+    use crate::modbus::{Operation, ResponseKind};
     use crate::output;
     use crate::registers::{DataType, RegisterIndex};
     use futures::{StreamExt as _, TryStreamExt};
@@ -157,8 +157,6 @@ pub mod read {
     pub struct Args {
         #[arg(required = true)]
         pub(super) registers: Vec<String>,
-        #[arg(long, short = 'i', default_value = "1")]
-        pub(super) device_id: u8,
         #[clap(flatten)]
         pub(super) connection: connection::Args,
         #[clap(flatten)]
@@ -235,11 +233,10 @@ pub mod read {
     pub async fn run(args: Args) -> Result<(), Error> {
         let Args {
             registers,
-            device_id,
             connection,
             output,
         } = args;
-        run_with_connection(&registers, device_id, output, async move {
+        run_with_connection(&registers, output, async move {
             Connection::new(connection)
                 .await
                 .map_err(Error::Communicate)
@@ -249,7 +246,6 @@ pub mod read {
 
     pub async fn run_with_connection(
         registers: &[String],
-        device_id: u8,
         output: output::Args,
         connection: impl Future<Output = Result<Connection, Error>>,
     ) -> Result<(), Error> {
@@ -293,14 +289,9 @@ pub mod read {
             .map(|read_request| {
                 let connection = &connection;
                 Ok::<_, Error>(async move {
-                    let transaction_id = connection.new_transaction_id();
                     loop {
                         let outcome = connection
-                            .send(Request {
-                                device_id,
-                                transaction_id,
-                                operation: read_request.to_operation(),
-                            })
+                            .send(read_request.to_operation())
                             .await
                             .map_err(Error::Communicate)?;
                         let Some(result) = outcome else {
@@ -390,7 +381,7 @@ pub mod read {
 
 pub mod write {
     use crate::connection::{self, Connection};
-    use crate::modbus::{Operation, Request, Response, ResponseKind};
+    use crate::modbus::{Operation, Response, ResponseKind};
     use crate::registers::{ParseValueError, RegisterIndex};
 
     /// Write the values into specified registers.
@@ -398,8 +389,6 @@ pub mod write {
     pub struct Args {
         #[arg(required = true)]
         registers: Vec<String>,
-        #[arg(long, short = 'i', default_value = "1")]
-        device_id: u8,
         #[arg(long)]
         no_read_back: bool,
         #[clap(flatten)]
@@ -454,15 +443,10 @@ pub mod write {
         }
         let connection = Connection::new(args.connection.clone()).await.unwrap();
         for (register, val) in write_ops {
-            let transaction_id = connection.new_transaction_id();
             let outcome = connection
-                .send(Request {
-                    device_id: args.device_id,
-                    transaction_id,
-                    operation: Operation::SetHoldings {
-                        address: register.address(),
-                        values: vec![val.into_inner()],
-                    },
+                .send(Operation::SetHoldings {
+                    address: register.address(),
+                    values: vec![val.into_inner()],
                 })
                 .await
                 .map_err(Error::Communicate)?;
@@ -498,12 +482,9 @@ pub mod write {
         }
 
         if !args.no_read_back {
-            super::read::run_with_connection(
-                &readback_registers,
-                args.device_id,
-                args.output,
-                async move { Ok(connection) },
-            )
+            super::read::run_with_connection(&readback_registers, args.output, async move {
+                Ok(connection)
+            })
             .await
             .map_err(Error::Readback)?;
         }
@@ -525,8 +506,6 @@ pub mod mqtt {
     pub struct Args {
         #[clap(flatten)]
         connection: connection::Args,
-        #[arg(long, short = 'i', default_value = "1")]
-        pub(super) device_id: u8,
 
         /// How to connect to the MQTT broker.
         ///
@@ -579,9 +558,7 @@ pub mod mqtt {
         ));
         let (client, mut client_loop) = AsyncClient::new(mqtt_options, 100);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
-        let mut device =
-            homie::SystemAirDevice::new(client, protocol, connection, args.device_id, command_rx);
-
+        let mut device = homie::SystemAirDevice::new(client, protocol, connection, command_rx);
         {
             let mut publish_future = std::pin::pin!(device.publish_device());
             loop {
