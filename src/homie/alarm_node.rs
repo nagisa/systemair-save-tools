@@ -14,6 +14,8 @@
 //!
 
 // TODO: the summary alarms are perfect to trigger early read out of the full alarm list.
+// TODO: alarm log?
+// TODO: clearing the alarms is achieved by writing to the adjacent `_CLEAR` register :(
 
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{PropertyDescription, PropertyValue, RegisterPropertyValue};

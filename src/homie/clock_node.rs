@@ -22,6 +22,10 @@ super::node::properties! { static PROPERTIES = [
     { "use-24-hour-format": BooleanValue = register "HOUR_FORMAT" },
     { "weekday": Weekday = register "DAY_OF_THE_WEEK" },
     { "dst-active": BooleanValue = register "DST_PERIOD_ACTIVE" },
+    { "uptime": UptimeValue = aggregate
+        "TIME_RTC_SECONDS_L", "TIME_RTC_SECONDS_H",
+        "SYSTEM_START_UP_TIME_L", "SYSTEM_START_UP_TIME_H"
+    },
     { "synchronize": SynchronizeClockValue = action },
 ] }
 
@@ -78,32 +82,23 @@ string_enum! {
     }
 }
 
-struct ClockValue {
-    y: Value,
-    mo: Value,
-    d: Value,
-    h: Value,
-    min: Value,
-    s: Value,
-}
+struct ClockValue(jiff::civil::DateTime);
 impl ClockValue {
     fn new(y: Value, mo: Value, d: Value, h: Value, min: Value, s: Value) -> Result<Self, ()> {
-        Ok(Self {
-            y,
-            mo,
-            d,
-            h,
-            min,
-            s,
-        })
+        Ok(Self(jiff::civil::datetime(
+            y.into_inner() as _,
+            mo.into_inner() as _,
+            d.into_inner() as _,
+            h.into_inner() as _,
+            min.into_inner() as _,
+            s.into_inner() as _,
+            0,
+        )))
     }
 }
 impl PropertyValue for ClockValue {
     fn value(&self) -> String {
-        format!(
-            "{:0>2}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0>2}",
-            self.y, self.mo, self.d, self.h, self.min, self.s
-        )
+        self.0.to_string()
     }
 }
 impl PropertyDescription for ClockValue {
@@ -115,9 +110,8 @@ impl PropertyDescription for ClockValue {
 }
 impl TryFrom<&str> for ClockValue {
     type Error = ();
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        todo!()
+    fn try_from(_: &str) -> Result<Self, Self::Error> {
+        unimplemented!("although clock is settable separately, this has not been implemented yet")
     }
 }
 
@@ -132,10 +126,7 @@ impl PropertyDescription for SynchronizeClockValue {
 impl TryFrom<&str> for SynchronizeClockValue {
     type Error = ();
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        if value != "now" {
-            return Err(());
-        }
-        return Ok(SynchronizeClockValue);
+        (value == "now").then_some(SynchronizeClockValue).ok_or(())
     }
 }
 impl ActionPropertyValue for SynchronizeClockValue {
@@ -165,6 +156,7 @@ impl ActionPropertyValue for SynchronizeClockValue {
                     tokio::time::sleep(Duration::from_millis(25)).await;
                     continue;
                 } else {
+                    // FIXME: what if response has a server exception?
                     break Ok(EventResult::ActionResponse {
                         node_id: node_id.clone(),
                         prop_idx,
@@ -185,5 +177,38 @@ impl ActionPropertyValue for SynchronizeClockValue {
 impl PropertyValue for SynchronizeClockValue {
     fn value(&self) -> String {
         "now".into()
+    }
+}
+
+struct UptimeValue {
+    rtc: u32,
+    start_time: u32,
+}
+impl UptimeValue {
+    fn new(rtc_l: Value, rtc_h: Value, up_l: Value, up_h: Value) -> Result<Self, ()> {
+        Ok(Self {
+            rtc: u32::from(rtc_h.into_inner()) << 16 | u32::from(rtc_l.into_inner()),
+            start_time: u32::from(up_h.into_inner()) << 16 | u32::from(up_l.into_inner()),
+        })
+    }
+}
+impl PropertyValue for UptimeValue {
+    fn value(&self) -> String {
+        let current = jiff::Timestamp::from_second(self.rtc as i64).unwrap();
+        let start = jiff::Timestamp::from_second(self.start_time as i64).unwrap();
+        let duration = current.duration_since(start);
+        duration.to_string()
+    }
+}
+impl PropertyDescription for UptimeValue {
+    fn description(_: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
+        PropertyDescriptionBuilder::new(HomieDataType::Duration).build()
+    }
+}
+// TODO: can we avoid unnecessary implementations like these?
+impl TryFrom<&str> for UptimeValue {
+    type Error = ();
+    fn try_from(_: &str) -> Result<Self, Self::Error> {
+        unreachable!()
     }
 }

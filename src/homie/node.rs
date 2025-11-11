@@ -276,10 +276,10 @@ macro_rules! properties {
             prop_id: HomieID::new_const($prop_id),
             mk_description: <$value_type as $crate::homie::value::PropertyDescription>::description,
             kind: &$crate::homie::node::AggregatePropertyKind::<$value_type> {
-                registers: &[$(RegisterIndex::from_name($register).unwrap()),*],
+                registers: &[$($crate::registers::RegisterIndex::from_name($register).unwrap()),*],
                 from_modbus: |modbus| {
                     let result = <$value_type>::new($(
-                        modbus.value_of(const { RegisterIndex::from_name($register).unwrap() })?
+                        modbus.value_of(const { $crate::registers::RegisterIndex::from_name($register).unwrap() })?
                     ),*);
                     Some(result.map(|v| Box::new(v) as _))
                 },

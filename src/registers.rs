@@ -566,7 +566,7 @@ macro_rules! for_each_register {
             7001: U16, RW, "FILTER_PERIOD", min = 3, max = 15;
             7002: U16, RW, "FILTER_REPLACEMENT_TIME_L";
             7003: U16, RW, "FILTER_REPLACEMENT_TIME_H";
-            7004: U16, R_, "FILTER_PERIOD_SET";
+            7004: U16, RW, "FILTER_PERIOD_SET";
             7005: U16, R_, "FILTER_REMAINING_TIME_L";
             7006: U16, R_, "FILTER_REMAINING_TIME_H";
             7007: U16, R_, "FILTER_ALARM_WAS_DETECTED";

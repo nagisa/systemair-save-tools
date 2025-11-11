@@ -3,6 +3,8 @@ mod clock_node;
 mod compensation_node;
 mod demand_control_node;
 mod fan_speed_setting_node;
+mod free_cooling_node;
+mod filter_node;
 mod node;
 mod value;
 
@@ -70,6 +72,8 @@ impl SystemAirDevice {
             Box::new(demand_control_node::DemandControlNode::new()) as _,
             Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new()) as _,
             Box::new(compensation_node::CompensationNode::new()) as _,
+            Box::new(free_cooling_node::FreeCoolingNode::new()) as _,
+            Box::new(filter_node::FilterNode::new()) as _,
         ];
         let mut description =
             homie5::device_description::DeviceDescriptionBuilder::new().name("SystemAIR SAVE");
@@ -426,7 +430,7 @@ impl SystemAirDevice {
                 response: ResponseKind::GetHoldings { values },
             } => {
                 let r1 = self
-                    .handle_modbus_register_response(address, dbg!(values), true)
+                    .handle_modbus_register_response(address, values, true)
                     .await;
                 let node = self.nodes.get(&node_id).unwrap();
                 let prop = &node.properties()[prop_idx];

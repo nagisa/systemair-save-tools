@@ -104,7 +104,9 @@ pub struct Args {
     baudrate: u32,
 
     /// The amount of additional time to wait between sending requests over TCP.
-    #[arg(long, default_value = "25ms")]
+    ///
+    /// Interacting too fast can make some Modbus TCP interfaces behave poorly.
+    #[arg(long, default_value = "100ms")]
     tcp_send_delay: humantime::Duration,
 }
 
@@ -363,7 +365,6 @@ impl TcpWorker {
             .push_back((request.transaction_id, response_deadline));
         send_time.reset(response_ready_time + *self.args.tcp_send_delay);
         request_timeout.reset(self.inflight[0].1);
-
         // FIXME: shouldn't await here, these should be part of select!
         // somehow.
         io.send(&request).await.map_err(Error::Send)?;
