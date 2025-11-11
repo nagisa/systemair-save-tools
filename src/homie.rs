@@ -374,6 +374,7 @@ impl SystemAirDevice {
 
     pub async fn step(&mut self) -> Result<(), ()> {
         loop {
+            tracing::trace!(commands.len = self.commands.len(), "step");
             tokio::select! {
                 event = self.event_stream.next(), if !self.event_stream.is_empty() => {
                     let Some(read_event) = event else { continue };

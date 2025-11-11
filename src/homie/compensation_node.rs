@@ -1,5 +1,5 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{string_enum, CelsiusValue, DynPropertyValue, UintValue};
+use crate::homie::value::{string_enum, CelsiusValue, UintValue};
 use crate::registers::Value;
 use homie5::device_description::HomieNodeDescription;
 use homie5::HomieID;

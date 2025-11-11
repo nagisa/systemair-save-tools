@@ -1,4 +1,8 @@
+use std::any::Any;
+use std::pin::Pin;
+
 use crate::homie::node::PropertyEntry;
+use crate::homie::ModbusStream;
 use crate::registers::{DataType, Value};
 use homie5::device_description::{
     HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
@@ -10,28 +14,23 @@ pub(crate) fn homie_enum<T: strum::VariantNames + strum::VariantArray + num_trai
 ) -> PropertyDescriptionBuilder {
     let names = <T as strum::VariantNames>::VARIANTS;
     let values = <T as strum::VariantArray>::VARIANTS;
-    let format = match prop.kind {
-        super::node::PropertyKind::Action { .. } | super::node::PropertyKind::Aggregate { .. } => {
-            HomiePropertyFormat::Enum(names.iter().copied().map(Into::into).collect())
-        }
-        super::node::PropertyKind::Register { register, .. } => {
+    let format = match prop.kind.registers() {
+        [register] => {
             let min = register.minimum_value().unwrap().into_inner();
             let max = register.maximum_value().unwrap().into_inner();
             let zip = names.iter().zip(values);
             let converted = zip.map(|(n, v)| (*n, v.to_u16().unwrap()));
             let filtered_names = converted.filter(|&(_, v)| v >= min && v <= max);
             HomiePropertyFormat::Enum(filtered_names.map(|v| v.0.into()).collect())
-        }
+        },
+        _ => HomiePropertyFormat::Enum(names.iter().copied().map(Into::into).collect())
     };
     PropertyDescriptionBuilder::new(HomieDataType::Enum).format(format)
 }
 
-pub(crate) trait PropertyValue: Send + Sync {
+pub(crate) trait PropertyValue: Any + Send + Sync {
     fn value(&self) -> String;
     fn target(&self) -> Option<String> {
-        None
-    }
-    fn as_register_property_value(&self) -> Option<&dyn RegisterPropertyValue> {
         None
     }
 }
@@ -42,8 +41,12 @@ pub(crate) type DynPropertyValue = dyn Send + Sync + PropertyValue;
 ///
 /// This means that these can directly produce a `Value` instead of more complicated concepts when
 /// writeback of them is initiated.
-pub(crate) trait RegisterPropertyValue: Send + Sync {
+pub(crate) trait RegisterPropertyValue {
     fn to_modbus(&self) -> u16;
+}
+
+pub(crate) trait ActionPropertyValue {
+    fn invoke(&self) -> Pin<Box<ModbusStream>>;
 }
 
 pub(crate) trait PropertyDescription {
@@ -171,11 +174,6 @@ macro_rules! string_enum {
         impl $crate::homie::value::PropertyValue for $name {
             fn value(&self) -> String {
                 <&'static str>::from(self).to_string()
-            }
-            fn as_register_property_value(&self)
-            -> Option<&dyn $crate::homie::value::RegisterPropertyValue>
-            {
-                Some(&*self)
             }
         }
 

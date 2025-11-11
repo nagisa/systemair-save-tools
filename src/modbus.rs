@@ -1,9 +1,7 @@
+use crate::registers::{RegisterIndex, Value};
 use tokio_util::bytes::Buf;
 use tokio_util::codec::{Decoder, Encoder};
 use tracing::trace;
-
-use crate::connection::Connection;
-use crate::registers::{RegisterIndex, Value};
 
 pub const MAX_SAFE_READ_COUNT: u16 = 123;
 
@@ -154,12 +152,20 @@ impl Decoder for ModbusTCPCodec {
                     device_id,
                     kind: match function_code {
                         3 => {
-                            let [_, _, _, values@..] = data else { unreachable!() };
-                            ResponseKind::GetHoldings { values: values.to_vec() }
+                            let [_, _, _, values @ ..] = data else {
+                                unreachable!()
+                            };
+                            ResponseKind::GetHoldings {
+                                values: values.to_vec(),
+                            }
                         }
                         6 => {
-                            let [_, _, _, _, a, b] = data else { unreachable!() };
-                            ResponseKind::SetHolding { value: u16::from_be_bytes([*a, *b]) }
+                            let [_, _, _, _, a, b] = data else {
+                                unreachable!()
+                            };
+                            ResponseKind::SetHolding {
+                                value: u16::from_be_bytes([*a, *b]),
+                            }
                         }
                         _ => continue,
                     },
