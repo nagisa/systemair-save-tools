@@ -3,11 +3,13 @@ mod clock_node;
 mod compensation_node;
 mod cooler_node;
 mod demand_control_node;
-mod fan_speed_setting_node;
+mod fan_speed_node;
 mod filter_node;
 mod free_cooling_node;
 mod heat_exchanger_node;
 mod heater_node;
+mod mode_node;
+mod temperature_controller_node;
 mod node;
 mod value;
 
@@ -70,16 +72,18 @@ impl SystemAirDevice {
         commands: mpsc::UnboundedReceiver<Command>,
     ) -> Self {
         let nodes = [
-            Box::new(clock_node::ClockNode::new()) as Box<dyn Node>,
             Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
-            Box::new(demand_control_node::DemandControlNode::new()) as _,
-            Box::new(fan_speed_setting_node::FanSpeedSettingsNode::new()) as _,
+            Box::new(clock_node::ClockNode::new()) as Box<dyn Node>,
             Box::new(compensation_node::CompensationNode::new()) as _,
-            Box::new(free_cooling_node::FreeCoolingNode::new()) as _,
+            Box::new(cooler_node::CoolerNode::new()) as _,
+            Box::new(demand_control_node::DemandControlNode::new()) as _,
+            Box::new(fan_speed_node::FanSpeedSettingsNode::new()) as _,
             Box::new(filter_node::FilterNode::new()) as _,
+            Box::new(free_cooling_node::FreeCoolingNode::new()) as _,
             Box::new(heater_node::HeaterNode::new()) as _,
             Box::new(heat_exchanger_node::HeatExchangerNode::new()) as _,
-            Box::new(cooler_node::CoolerNode::new()) as _,
+            Box::new(mode_node::ModeNode::new()) as _,
+            Box::new(temperature_controller_node::TemperatureControllerNode::new()) as _,
         ];
         let mut description =
             homie5::device_description::DeviceDescriptionBuilder::new().name("SystemAIR SAVE");

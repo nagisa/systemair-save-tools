@@ -1,6 +1,7 @@
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
     ActionPropertyValue, BooleanValue, PropertyDescription, PropertyValue, RegisterPropertyValue,
+    RemainingTimeValue,
 };
 use crate::homie::EventResult;
 use crate::modbus;
@@ -87,34 +88,6 @@ impl From<Value> for ReplacementPeriod {
         Self {
             months: value.into_inner(),
         }
-    }
-}
-
-struct RemainingTimeValue(jiff::Span);
-impl RemainingTimeValue {
-    fn new(l: Value, h: Value) -> Result<Self, ()> {
-        let seconds_remaining = u32::from(h.into_inner()) << 16 | u32::from(l.into_inner());
-        let span = jiff::Span::new().seconds(seconds_remaining);
-        let now = jiff::Zoned::now();
-        let round_cfg = jiff::SpanRound::new().largest(jiff::Unit::Month).relative(&now);
-        Ok(Self(span.round(round_cfg).map_err(|_| ())?))
-    }
-}
-impl PropertyValue for RemainingTimeValue {
-    fn value(&self) -> String {
-        self.0.to_string()
-    }
-}
-impl PropertyDescription for RemainingTimeValue {
-    fn description(_: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(HomieDataType::Duration).build()
-    }
-}
-// TODO: can we avoid unnecessary implementations like these?
-impl TryFrom<&str> for RemainingTimeValue {
-    type Error = ();
-    fn try_from(_: &str) -> Result<Self, Self::Error> {
-        unreachable!()
     }
 }
 

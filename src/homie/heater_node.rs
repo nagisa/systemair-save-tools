@@ -19,6 +19,7 @@ super::node::properties! { static PROPERTIES = [
     { "eco-temperature-offset": CelsiusValue = register "ECO_T_Y1_OFFSET" },
     { "circulation-pump-start-temperature": CelsiusValue = register "HEATER_CIRC_PUMP_START_T" },
     { "circulation-pump-stop-delay": StopDelay = register "HEATER_CIRC_PUMP_START_T" },
+    { "measured-heater-temperature": CelsiusValue = register "SENSOR_OHT" },
 ] }
 
 pub struct HeaterNode {}

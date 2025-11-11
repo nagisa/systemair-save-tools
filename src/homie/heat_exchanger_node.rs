@@ -18,9 +18,10 @@ super::node::properties! { static PROPERTIES = [
     { "humidity-transfer-pband": UintValue = register "ROTOR_RH_TRANSFER_CTRL_PBAND" },
     { "humidity-transfer-itime": UintValue = register "ROTOR_RH_TRANSFER_CTRL_ITIME" },
     { "exchanger-speed-limit-for-humidity-transfer": UintValue = register "HEAT_EXCHANGER_SPEED_LIMIT_RH_TRANSFER" },
-    { "computed-extract-air-humidity": SpcHumidityValue = register "ROTOR_EA_SPEC_HUMIDITY" },
-    { "computed-outdoor-air-humidity": SpcHumidityValue = register "ROTOR_OA_SPEC_HUMIDITY" },
-    { "computed-extract-air-humidity-setpoint": SpcHumidityValue = register "ROTOR_EA_SPEC_HUMIDITY_SETPOINT" },
+    { "current-extract-air-humidity": SpcHumidityValue = register "ROTOR_EA_SPEC_HUMIDITY" },
+    { "current-outdoor-air-humidity": SpcHumidityValue = register "ROTOR_OA_SPEC_HUMIDITY" },
+    { "current-extract-air-humidity-setpoint": SpcHumidityValue = register "ROTOR_EA_SPEC_HUMIDITY_SETPOINT" },
+    { "current-frost-protection-sensor-temperature": CelsiusValue = register "SENSOR_FPT" },
 ] }
 
 pub struct HeatExchangerNode {}
