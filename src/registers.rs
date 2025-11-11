@@ -420,9 +420,9 @@ macro_rules! for_each_register {
             2148: U16, R_, "HEAT_EXCHANGER_SPEED_LIMIT_RH_TRANSFER", min = 0, max = 100;
             2149: U16, R_, "PWM_TRIAC_OUTPUT", min = 0, max = 100;
             2201: U16, RW, "ROTOR_RH_TRANSFER_CTRL_PBAND", min = 0, max = 40;
-            2202: U16, RW, "ROTOR_RH_TRANSFER_CTRL_ITIME", min = 120, max = 0;
-            2203: U16, RW, "ROTOR_RH_TRANSFER_CTRL_SETPOINT", min = 100, max = 45;
-            2204: U16, RW, "ROTOR_RH_TRANSFER_CTRL_ON_OFF", min = 1, max = 1;
+            2202: U16, RW, "ROTOR_RH_TRANSFER_CTRL_ITIME", min = 0, max = 120;
+            2203: U16, RW, "ROTOR_RH_TRANSFER_CTRL_SETPOINT", min = 45, max = 100;
+            2204: U16, RW, "ROTOR_RH_TRANSFER_CTRL_ON_OFF", min = 0, max = 1;
             2211: SPH, R_, "ROTOR_EA_SPEC_HUMIDITY", min = 0;
             2212: SPH, R_, "ROTOR_OA_SPEC_HUMIDITY", min = 0;
             2213: SPH, R_, "ROTOR_EA_SPEC_HUMIDITY_SETPOINT", min = 0;

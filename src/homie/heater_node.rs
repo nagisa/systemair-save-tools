@@ -1,7 +1,6 @@
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue,
-    UintValue,
+    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue, StopDelay, UintValue
 };
 use crate::registers::Value;
 use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
@@ -9,14 +8,17 @@ use homie5::HomieID;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
+    { "cooldown-active": BooleanValue = register "FUNCTION_ACTIVE_HEATER_COOL_DOWN" },
     { "remaining-cooldown-time": CooldownDuration = register "SPEED_ELECTRICAL_HEATER_HOT_COUNTER" },
     // INVERTED??
-    { "heater-demand": UintValue = register "SATC_HEAT_DEMAND" },
+    { "demand": UintValue = register "SATC_HEAT_DEMAND" },
     { "active": BooleanValue = register "FUNCTION_ACTIVE_HEATING" },
     { "current": UintValue = register "PWM_TRIAC_OUTPUT" },
     { "enable-eco": BooleanValue = register "ECO_MODE_ON_OFF" },
     { "eco-active": BooleanValue = register "ECO_FUNCTION_ACTIVE" },
     { "eco-temperature-offset": CelsiusValue = register "ECO_T_Y1_OFFSET" },
+    { "circulation-pump-start-temperature": CelsiusValue = register "HEATER_CIRC_PUMP_START_T" },
+    { "circulation-pump-stop-delay": StopDelay = register "HEATER_CIRC_PUMP_START_T" },
 ] }
 
 pub struct HeaterNode {}
@@ -75,3 +77,4 @@ impl From<Value> for CooldownDuration {
         Self(jiff::SignedDuration::new(value.into_inner() as _, 0))
     }
 }
+

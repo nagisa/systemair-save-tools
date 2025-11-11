@@ -150,6 +150,71 @@ impl PropertyDescription for CelsiusValue {
     }
 }
 
+pub(crate) struct SpcHumidityValue(u16);
+impl TryFrom<Value> for SpcHumidityValue {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Ok(Self(value.into_inner()))
+    }
+}
+impl TryFrom<&str> for SpcHumidityValue {
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let value = value.parse::<f32>().map_err(|_| ())?;
+        Ok(Self((value * DataType::SPH.scale() as f32).round() as _))
+    }
+}
+impl PropertyValue for SpcHumidityValue {
+    fn value(&self) -> String {
+        (self.0 as f32 / DataType::SPH.scale() as f32).to_string()
+    }
+}
+impl RegisterPropertyValue for SpcHumidityValue {
+    fn to_modbus(&self) -> u16 {
+        self.0 as u16
+    }
+}
+impl PropertyDescription for SpcHumidityValue {
+    fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
+        PropertyDescriptionBuilder::new(HomieDataType::Float)
+            .unit("g/kg")
+            .build()
+    }
+}
+
+pub(crate) struct StopDelay(u16);
+impl PropertyValue for StopDelay {
+    fn value(&self) -> String {
+        format!("PT{}M", self.0)
+    }
+}
+impl PropertyDescription for StopDelay {
+    fn description(_prop: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
+        PropertyDescriptionBuilder::new(homie5::HomieDataType::Duration).build()
+    }
+}
+impl RegisterPropertyValue for StopDelay {
+    fn to_modbus(&self) -> u16 {
+        self.0
+    }
+}
+impl TryFrom<&str> for StopDelay {
+    type Error = jiff::Error;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let span = value.parse::<jiff::Span>()?;
+        let minutes = span.total(jiff::Unit::Minute)?;
+        if minutes < 0.0 || minutes > 20.0 {
+            return Err(jiff::Error::from_args(format_args!("pump stop delay out of range")));
+        }
+        Ok(Self(minutes.round() as u16))
+    }
+}
+impl From<Value> for StopDelay {
+    fn from(value: Value) -> Self {
+        Self(value.into_inner())
+    }
+}
+
 macro_rules! string_enum {
     (
         $(#[$meta:meta])*

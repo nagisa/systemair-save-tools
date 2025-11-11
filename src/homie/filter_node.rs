@@ -9,7 +9,6 @@ use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
 use homie5::{HomieDataType, HomieID};
-use jiff::Error;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
@@ -73,8 +72,8 @@ impl TryFrom<&str> for ReplacementPeriod {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let duration = value.parse::<jiff::Span>()?;
         let months = duration.total(jiff::Unit::Month)?;
-        if months > 15.4 || months < 2.6 {
-            return Err(Error::from_args(format_args!(
+        if months < 3.0 || months > 15.0 {
+            return Err(jiff::Error::from_args(format_args!(
                 "filter replacement period out of range"
             )));
         }

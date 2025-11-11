@@ -18,7 +18,7 @@
 // TODO: clearing the alarms is achieved by writing to the adjacent `_CLEAR` register :(
 
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{PropertyDescription, PropertyValue, RegisterPropertyValue};
+use crate::homie::value::{BooleanValue, PropertyDescription, PropertyValue, RegisterPropertyValue};
 use crate::registers::Value;
 use homie5::device_description::{
     HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
@@ -27,6 +27,7 @@ use homie5::{HomieDataType, HomieID};
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
+     { "any": BooleanValue = register "OUTPUT_ALARM" },
      { "supply-air-fan-control": AlarmValue = register "ALARM_SAF_CTRL_ALARM" },
      { "extract-air-fan-control": AlarmValue = register "ALARM_EAF_CTRL_ALARM" },
      { "frost-protection": AlarmValue = register "ALARM_FROST_PROT_ALARM" },
@@ -61,10 +62,6 @@ super::node::properties! { static PROPERTIES = [
      { "overheat-temperature": AlarmValue = register "ALARM_OVERHEAT_TEMPERATURE_ALARM" },
      { "fire": AlarmValue = register "ALARM_FIRE_ALARM_ALARM" },
      { "filter-warning": AlarmValue = register "ALARM_FILTER_WARNING_ALARM" },
-     // TODO: add filter warning duration.
-     { "summary-type-a": AlarmValue = register "ALARM_TYPE_A" },
-     { "summary-type-b": AlarmValue = register "ALARM_TYPE_B" },
-     { "summary-type-c": AlarmValue = register "ALARM_TYPE_C" },
 ] }
 
 pub struct AlarmNode {}

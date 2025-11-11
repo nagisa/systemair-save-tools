@@ -79,6 +79,14 @@ super::node::properties! { static PROPERTIES = [
     { "min-free-cooling-extract": AirflowLevel = register "FREE_COOLING_MIN_SPEED_LEVEL_EAF" },
     { "during-active-week-schedule": WeeklyScheduleLevel = register "WS_FAN_LEVEL_SCHEDULED" },
     { "during-inactive-week-schedule": WeeklyScheduleLevel = register "WS_FAN_LEVEL_UNSCHEDULED" },
+    { "current-supply-fan-rpm": UintValue = register "SENSOR_RPM_SAF" },
+    { "current-extract-fan-rpm": UintValue = register "SENSOR_RPM_EAF" },
+    { "current-supply-flow": UintValue = register "SENSOR_FLOW_PIGGYBACK_SAF" },
+    { "current-extract-flow": UintValue = register "SENSOR_FLOW_PIGGYBACK_EAF" },
+    { "pressure-guard-active": BooleanValue = register "FUNCTION_ACTIVE_PRESSURE_GUARD" },
+    { "cooker-hood-active": BooleanValue = register "FUNCTION_ACTIVE_COOKER_HOOD" },
+    { "vacuum-cleaner-active": BooleanValue = register "FUNCTION_ACTIVE_VACUUM_CLEANER" },
+    { "secondary-air-active": BooleanValue = register "FUNCTION_ACTIVE_SECONDARY_AIR" },
 ] }
 
 pub struct FanSpeedSettingsNode {}

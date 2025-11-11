@@ -1,10 +1,12 @@
 mod alarm_node;
 mod clock_node;
 mod compensation_node;
+mod cooler_node;
 mod demand_control_node;
 mod fan_speed_setting_node;
-mod free_cooling_node;
 mod filter_node;
+mod free_cooling_node;
+mod heat_exchanger_node;
 mod heater_node;
 mod node;
 mod value;
@@ -76,6 +78,8 @@ impl SystemAirDevice {
             Box::new(free_cooling_node::FreeCoolingNode::new()) as _,
             Box::new(filter_node::FilterNode::new()) as _,
             Box::new(heater_node::HeaterNode::new()) as _,
+            Box::new(heat_exchanger_node::HeatExchangerNode::new()) as _,
+            Box::new(cooler_node::CoolerNode::new()) as _,
         ];
         let mut description =
             homie5::device_description::DeviceDescriptionBuilder::new().name("SystemAIR SAVE");
