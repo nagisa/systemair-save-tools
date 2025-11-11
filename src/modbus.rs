@@ -5,7 +5,7 @@ use tracing::trace;
 
 pub const MAX_SAFE_READ_COUNT: u16 = 123;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Request {
     pub device_id: u8,
     pub transaction_id: u16,
@@ -18,9 +18,9 @@ impl Request {
     /// This is used to calculate send slots on a connection in an effort to avoid predictable
     /// "Server Busy" exceptions or loss of requests.
     pub fn expected_response_length(&self) -> u16 {
-        let bytes_total = match self.operation {
-            Operation::GetHoldings { address: _, count } => u32::from(count) * 2,
-            Operation::SetHolding { .. } => 2,
+        let bytes_total = match &self.operation {
+            Operation::GetHoldings { address: _, count } => u32::from(*count) * 2,
+            Operation::SetHoldings { address: _, values } => values.len() as u32 * 2,
         };
         let rtu_blocks = (bytes_total + 0xFE) / 0xFF;
         // 1 byte no padding, 2 bytes crc, 2 bytes address and function.
@@ -29,10 +29,10 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Operation {
     GetHoldings { address: u16, count: u16 },
-    SetHolding { address: u16, value: u16 },
+    SetHoldings { address: u16, values: Vec<u16> },
 }
 
 #[derive(Debug)]
@@ -47,7 +47,7 @@ impl Response {
         match &self.kind {
             ResponseKind::ErrorCode(c) => Some(*c),
             ResponseKind::GetHoldings { values: _ } => None,
-            ResponseKind::SetHolding { value: _ } => None,
+            ResponseKind::SetHoldings { address: _, words: _ } => None,
         }
     }
 
@@ -60,7 +60,7 @@ impl Response {
 pub enum ResponseKind {
     ErrorCode(u8),
     GetHoldings { values: Vec<u8> },
-    SetHolding { value: u16 },
+    SetHoldings { address: u16, words: u16 },
 }
 
 pub trait Codec:
@@ -77,18 +77,24 @@ impl Encoder<&Request> for ModbusTCPCodec {
         req: &Request,
         dst: &mut tokio_util::bytes::BytesMut,
     ) -> Result<(), Self::Error> {
-        match req.operation {
+        match &req.operation {
             Operation::GetHoldings { address, count } => {
                 dst.extend(req.transaction_id.to_be_bytes());
                 dst.extend(&[0, 0, 0, 0, req.device_id, 3]);
                 dst.extend((address - 1).to_be_bytes());
                 dst.extend(count.to_be_bytes());
             }
-            Operation::SetHolding { address, value } => {
+            Operation::SetHoldings { address, values } => {
+                let bytes = u8::try_from(values.len() * 2)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
                 dst.extend(req.transaction_id.to_be_bytes());
-                dst.extend(&[0, 0, 0, 0, req.device_id, 6]);
+                dst.extend(&[0, 0, 0, 0, req.device_id, 16]);
                 dst.extend((address - 1).to_be_bytes());
-                dst.extend(value.to_be_bytes());
+                dst.extend(u16::from(bytes / 2).to_be_bytes());
+                dst.extend(bytes.to_be_bytes());
+                for value in values {
+                    dst.extend(value.to_be_bytes());
+                }
             }
         };
         trace!(message="sending encoded", buffer=?dst);
@@ -159,12 +165,13 @@ impl Decoder for ModbusTCPCodec {
                                 values: values.to_vec(),
                             }
                         }
-                        6 => {
-                            let [_, _, _, _, a, b] = data else {
+                        16 => {
+                            let [_, _, a1, a2, w1, w2] = data else {
                                 unreachable!()
                             };
-                            ResponseKind::SetHolding {
-                                value: u16::from_be_bytes([*a, *b]),
+                            ResponseKind::SetHoldings {
+                                address: u16::from_be_bytes([*a1, *a2]),
+                                words: u16::from_be_bytes([*w1, *w2]),
                             }
                         }
                         _ => continue,

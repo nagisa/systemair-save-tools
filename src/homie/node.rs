@@ -80,10 +80,10 @@ where
         let value = (value as Box<dyn std::any::Any>)
             .downcast::<T>()
             .expect("type confusion");
-        let value = value.to_modbus();
+        let values = vec![value.to_modbus()];
         Box::pin(futures::stream::once(async move {
             tracing::warn!("setting!");
-            let operation = modbus::Operation::SetHolding { address, value };
+            let operation = modbus::Operation::SetHoldings { address, values };
             let request = modbus::Request {
                 device_id,
                 transaction_id: modbus.new_transaction_id(),
@@ -102,7 +102,7 @@ where
             let request = modbus::Request {
                 device_id,
                 transaction_id: modbus.new_transaction_id(),
-                operation,
+                operation: operation.clone(),
             };
             let response = modbus.send_retrying(request).await?;
             return Ok(EventResult::HomieSet {
@@ -225,16 +225,16 @@ where
 
     fn homie_set_to_modbus(
         &self,
-        _node_id: HomieID,
-        _prop_idx: usize,
-        _modbus: Arc<Connection>,
-        _device_id: u8,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        device_id: u8,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>> {
         let value = (value as Box<dyn std::any::Any>)
             .downcast::<T>()
             .expect("type confusion");
-        value.invoke()
+        value.invoke(node_id, prop_idx, modbus, device_id)
     }
 
     fn adjust_description(&self, description: &mut HomiePropertyDescription) {

@@ -1,13 +1,16 @@
 use std::any::Any;
 use std::pin::Pin;
+use std::sync::Arc;
 
+use crate::connection::Connection;
 use crate::homie::node::PropertyEntry;
 use crate::homie::ModbusStream;
+use crate::modbus;
 use crate::registers::{DataType, Value};
 use homie5::device_description::{
     HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
-use homie5::HomieDataType;
+use homie5::{HomieDataType, HomieID};
 
 pub(crate) fn homie_enum<T: strum::VariantNames + strum::VariantArray + num_traits::ToPrimitive>(
     prop: &PropertyEntry,
@@ -22,8 +25,8 @@ pub(crate) fn homie_enum<T: strum::VariantNames + strum::VariantArray + num_trai
             let converted = zip.map(|(n, v)| (*n, v.to_u16().unwrap()));
             let filtered_names = converted.filter(|&(_, v)| v >= min && v <= max);
             HomiePropertyFormat::Enum(filtered_names.map(|v| v.0.into()).collect())
-        },
-        _ => HomiePropertyFormat::Enum(names.iter().copied().map(Into::into).collect())
+        }
+        _ => HomiePropertyFormat::Enum(names.iter().copied().map(Into::into).collect()),
     };
     PropertyDescriptionBuilder::new(HomieDataType::Enum).format(format)
 }
@@ -46,7 +49,13 @@ pub(crate) trait RegisterPropertyValue {
 }
 
 pub(crate) trait ActionPropertyValue {
-    fn invoke(&self) -> Pin<Box<ModbusStream>>;
+    fn invoke(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        device_id: u8,
+    ) -> Pin<Box<ModbusStream>>;
 }
 
 pub(crate) trait PropertyDescription {

@@ -25,3 +25,5 @@ strum = { version = "0.26.3", features = ["derive"] }
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 num-derive = "0.4.2"
 num-traits = "0.2.19"
+jiff = "0.2.16"
+async-stream = "0.3.6"

@@ -34,6 +34,11 @@ pub enum EventResult {
         operation: Operation,
         response: ResponseKind,
     },
+    ActionResponse {
+        node_id: HomieID,
+        prop_idx: usize,
+        value: Box<DynPropertyValue>,
+    },
 }
 
 type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
@@ -120,7 +125,7 @@ impl SystemAirDevice {
                             *range.start(),
                             u16::try_from(range.len()).unwrap(),
                             // FIXME: determine read period from node information.
-                            Duration::from_secs(5),
+                            Duration::from_secs(30),
                         );
                     }
 
@@ -157,18 +162,18 @@ impl SystemAirDevice {
     }
 
     fn schedule_periodic_read(&mut self, address: u16, count: u16, period: Duration) {
-        let operation = Operation::GetHoldings { address, count };
         let modbus = Arc::clone(&self.modbus);
         let device_id = self.modbus_device_id;
         let stream = futures::stream::unfold(Instant::now(), move |when| {
             let modbus = Arc::clone(&modbus);
             let transaction_id = modbus.new_transaction_id();
             async move {
+                let operation = Operation::GetHoldings { address, count };
                 tokio::time::sleep_until(when).await;
                 let request = Request {
                     device_id,
                     transaction_id,
-                    operation,
+                    operation: operation.clone(),
                 };
                 let response = match modbus.send_retrying(request).await {
                     Ok(r) => r,
@@ -260,7 +265,7 @@ impl SystemAirDevice {
         }
         let mut property_values = Vec::new();
         for (node_id, node) in &self.nodes {
-            for (prop_idx, property) in node.properties().iter().enumerate() {
+            'next_prop: for (prop_idx, property) in node.properties().iter().enumerate() {
                 for register in property.kind.registers() {
                     let address = register.address();
                     if !changing_registers.is_set(address) {
@@ -275,6 +280,7 @@ impl SystemAirDevice {
                     );
                     let old = property.kind.value_from_modbus(&self.modbus_values);
                     property_values.push((node_id.clone(), prop_idx, old));
+                    continue 'next_prop;
                 }
             }
         }
@@ -353,6 +359,7 @@ impl SystemAirDevice {
                 let Ok(value) = property.kind.value_from_homie(&value) else {
                     tracing::warn!(%node_id, %prop_id, value, "property/set could not be parsed");
                     let Some(Ok(old)) = property.kind.value_from_modbus(&self.modbus_values) else {
+                        tracing::warn!(%node_id, %prop_id, "old value could not be parsed");
                         return Ok(());
                     };
                     self.handle_target_change(&node_id, prop_idx, &*old).await?;
@@ -430,7 +437,7 @@ impl SystemAirDevice {
                 response: ResponseKind::GetHoldings { values },
             } => {
                 let r1 = self
-                    .handle_modbus_register_response(address, values, true)
+                    .handle_modbus_register_response(address, dbg!(values), true)
                     .await;
                 let node = self.nodes.get(&node_id).unwrap();
                 let prop = &node.properties()[prop_idx];
@@ -442,6 +449,14 @@ impl SystemAirDevice {
                     let prop_id = &prop.prop_id;
                     tracing::debug!(%node_id, %prop_id, "failed to parse set value from modbus");
                 }
+            }
+            EventResult::ActionResponse {
+                node_id,
+                prop_idx,
+                value,
+            } => {
+                self.handle_value_change(&node_id, prop_idx, &*value)
+                    .await?;
             }
             EventResult::Periodic { .. } => unreachable!("EventResult::Periodic"),
             EventResult::HomieSet { .. } => unreachable!("EventResult::HomieSet"),

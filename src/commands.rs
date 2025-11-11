@@ -349,7 +349,7 @@ pub mod read {
                                     }
                                     buf
                                 }
-                                ResponseKind::SetHolding { .. } => {
+                                ResponseKind::SetHoldings { .. } => {
                                     "SetHolding response?".to_string()
                                 }
                             };
@@ -371,7 +371,7 @@ pub mod read {
                                     let range = value_offset..(value_offset + dt.bytes());
                                     (Some(dt.from_bytes(&values[range]).collect()), None)
                                 }
-                                ResponseKind::SetHolding { .. } => (None, None),
+                                ResponseKind::SetHoldings { .. } => (None, None),
                             };
                             OutputSchema {
                                 address,
@@ -459,9 +459,9 @@ pub mod write {
                 .send(Request {
                     device_id: args.device_id,
                     transaction_id,
-                    operation: Operation::SetHolding {
+                    operation: Operation::SetHoldings {
                         address: register.address(),
-                        value: val.into_inner(),
+                        values: vec![val.into_inner()],
                     },
                 })
                 .await
@@ -479,11 +479,14 @@ pub mod write {
                     )
                 }
                 Some(Response {
-                    kind: ResponseKind::SetHolding { value },
+                    kind:
+                        ResponseKind::SetHoldings {
+                            address,
+                            words: count,
+                        },
                     ..
                 }) => {
-                    // IAM seems to be returning garbage in `value` here...
-                    tracing::info!(address, response = value, "register set")
+                    tracing::info!(address, count, "registers set")
                 }
                 Some(Response { kind: _, .. }) => {
                     tracing::warn!(address, "unexpected response to a set command")

@@ -183,7 +183,7 @@ impl Connection {
     /// [`send`] but retries timeouts and `Server Busy` exceptions.
     pub async fn send_retrying(&self, request: Request) -> Result<Response, Error> {
         loop {
-            let response = self.send(request).await?;
+            let response = self.send(request.clone()).await?;
             let Some(response) = response else { continue };
             if response.is_server_busy() {
                 // IAM was busy with other requests. Give it some time…
