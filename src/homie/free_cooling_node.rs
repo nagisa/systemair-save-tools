@@ -1,6 +1,6 @@
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    string_enum, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, UintValue,
+    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue,
 };
 use crate::registers::Value;
 use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
