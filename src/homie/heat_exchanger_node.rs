@@ -1,10 +1,7 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{
-    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue, SpcHumidityValue, UintValue
-};
-use crate::registers::Value;
-use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
+use crate::homie::value::{BooleanValue, CelsiusValue, SpcHumidityValue, UintValue};
 use homie5::HomieID;
+use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
@@ -52,4 +49,3 @@ impl Node for HeatExchangerNode {
         &PROPERTIES
     }
 }
-

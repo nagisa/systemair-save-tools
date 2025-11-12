@@ -58,6 +58,34 @@ enum PublishProperty {
     OnChange,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("could not publish the state init message")]
+    PublishStateInit(#[source] rumqttc::v5::ClientError),
+    #[error("could not construct the device description")]
+    BuildDeviceDescription(#[source] homie5::Homie5ProtocolError),
+    #[error("could not publish the device description message")]
+    PublishDeviceDescription(#[source] rumqttc::v5::ClientError),
+    #[error("could not figure out which topics to subscribe to")]
+    ConstructTopicSubscriptions(#[source] homie5::Homie5ProtocolError),
+    #[error("could not subscribe to the needed topics")]
+    Subscribe(#[source] rumqttc::v5::ClientError),
+    #[error("could not publish the state ready message")]
+    PublishStateReady(#[source] rumqttc::v5::ClientError),
+    #[error("unexpected homie device ID ({0}) encountered")]
+    WrongDeviceId(HomieID),
+    #[error("unknown node {0}")]
+    UnknownNode(HomieID),
+    #[error("unknown node property {0}/{1}")]
+    UnknownProperty(HomieID, HomieID),
+    #[error("modbus connection fault")]
+    ModbusStreamError(#[source] connection::Error),
+    #[error("could not publish {1}/{2}/$target = {3}")]
+    PublishTarget(#[source] rumqttc::v5::ClientError, HomieID, HomieID, String),
+    #[error("could not publish {1}/{2} = {3}")]
+    PublishValue(#[source] rumqttc::v5::ClientError, HomieID, HomieID, String),
+}
+
 type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
 
 type ModbusReadStream = SelectAll<Pin<Box<ModbusStream>>>;
@@ -115,20 +143,26 @@ impl SystemAirDevice {
         }
     }
 
-    pub async fn publish_device(&mut self) -> Result<(), rumqttc::v5::ClientError> {
+    pub async fn publish_device(&mut self) -> Result<(), Error> {
         for step in homie5::homie_device_publish_steps() {
             match step {
                 homie5::DevicePublishStep::DeviceStateInit => {
                     self.state = HomieDeviceStatus::Init;
                     let p = self.protocol.publish_state(self.state);
-                    self.mqtt.homie_publish(p).await?;
+                    self.mqtt
+                        .homie_publish(p)
+                        .await
+                        .map_err(Error::PublishStateInit)?;
                 }
                 homie5::DevicePublishStep::DeviceDescription => {
                     let p = self
                         .protocol
                         .publish_description(&self.description)
-                        .expect("TODO");
-                    self.mqtt.homie_publish(p).await?;
+                        .map_err(Error::BuildDeviceDescription)?;
+                    self.mqtt
+                        .homie_publish(p)
+                        .await
+                        .map_err(Error::PublishDeviceDescription)?;
                 }
                 homie5::DevicePublishStep::PropertyValues => {
                     tracing::info!("waiting for device read out…");
@@ -149,9 +183,8 @@ impl SystemAirDevice {
                             Duration::from_secs(30),
                         );
                     }
-
                     while !self.modbus_values.has_all_values(&need_registers) {
-                        self.step().await.expect("TODO");
+                        self.step().await?;
                     }
                     // rumqttc appears to be sending publishes in a weird order that results in
                     // some of the properties getting published *after* `$state = Ready`. Yielding
@@ -159,23 +192,28 @@ impl SystemAirDevice {
                     tokio::task::yield_now().await;
                 }
                 homie5::DevicePublishStep::SubscribeProperties => {
-                    // FIXME: fix need for peekable upstream somehow? Right now an empty
-                    // subscription surfaces in `client_loop.poll()` result
-                    // `MqttState(EmptySubscription)`
+                    // SUBTLE: rumqttc balks at empty list of subscriptions, but that can happen if
+                    // we don't really have any settable properties...
                     let mut p = self
                         .protocol
                         .subscribe_props(&self.description)
-                        .expect("TODO")
+                        .map_err(Error::ConstructTopicSubscriptions)?
                         .peekable();
                     if p.peek().is_some() {
-                        self.mqtt.homie_subscribe(p).await?;
+                        self.mqtt
+                            .homie_subscribe(p)
+                            .await
+                            .map_err(Error::Subscribe)?;
                     }
                 }
                 homie5::DevicePublishStep::DeviceStateReady => {
-                    tracing::debug!("device becomes ready...");
                     self.state = HomieDeviceStatus::Ready;
                     let p = self.protocol.publish_state(self.state);
-                    self.mqtt.homie_publish(p).await?;
+                    self.mqtt
+                        .homie_publish(p)
+                        .await
+                        .map_err(Error::PublishStateReady)?;
+                    tracing::debug!("device became ready...");
                 }
             }
         }
@@ -208,8 +246,9 @@ impl SystemAirDevice {
         node_id: &HomieID,
         prop_idx: usize,
         new: &DynPropertyValue,
-    ) -> Result<(), ()> {
-        let node = self.nodes.get(node_id).unwrap();
+    ) -> Result<(), Error> {
+        let node = self.nodes.get(node_id);
+        let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
         let prop = &node.properties()[prop_idx];
         let prop_id = &prop.prop_id;
         let Some(pd) = self.description.get_property_by_id(node_id, prop_id) else {
@@ -223,9 +262,11 @@ impl SystemAirDevice {
         let val = new.value();
         let msg = self
             .protocol
-            .publish_value(node_id, prop_id, val, pd.retained);
-        self.mqtt.homie_publish(msg).await.expect("TODO");
-        Ok(())
+            .publish_value(node_id, prop_id, &val, pd.retained);
+        self.mqtt
+            .homie_publish(msg)
+            .await
+            .map_err(|e| Error::PublishValue(e, node_id.clone(), prop_id.clone(), val))
     }
 
     async fn handle_target_change(
@@ -233,8 +274,9 @@ impl SystemAirDevice {
         node_id: &HomieID,
         prop_idx: usize,
         new: &DynPropertyValue,
-    ) -> Result<(), ()> {
-        let node = self.nodes.get(node_id).unwrap();
+    ) -> Result<(), Error> {
+        let node = self.nodes.get(node_id);
+        let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
         let prop = &node.properties()[prop_idx];
         let prop_id = &prop.prop_id;
         let Some(pd) = self.description.get_property_by_id(node_id, &prop_id) else {
@@ -250,9 +292,11 @@ impl SystemAirDevice {
         };
         let msg = self
             .protocol
-            .publish_target(&node_id, &prop_id, tgt, pd.retained);
-        self.mqtt.homie_publish(msg).await.expect("TODO");
-        Ok(())
+            .publish_target(&node_id, &prop_id, &tgt, pd.retained);
+        self.mqtt
+            .homie_publish(msg)
+            .await
+            .map_err(|e| Error::PublishTarget(e, node_id.clone(), prop_id.clone(), tgt))
     }
 
     async fn handle_modbus_register_response(
@@ -260,7 +304,7 @@ impl SystemAirDevice {
         address: u16,
         values: Vec<u8>,
         property_handling: impl Fn(&HomieID, usize) -> PublishProperty,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Error> {
         // This is somewhat awkward to write as we want our nodes to see a full atomic change to
         // the register value view, but we also want to have the old values to compare against.
         // For that reason the updates to our cached view of the modbus registers occurs after we
@@ -303,12 +347,13 @@ impl SystemAirDevice {
             self.modbus_values.set_value(address, word);
         }
         for (node_id, prop_idx, old) in property_values {
-            let node = self.nodes.get(&node_id).unwrap();
+            let node = self.nodes.get(&node_id);
+            let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
             let prop = &node.properties()[prop_idx];
             let new = prop.kind.value_from_modbus(&self.modbus_values);
             let (value_changed, target_changed, new) = match (old, new) {
                 (None, None) => (false, false, None),
-                (Some(_), None) => todo!("erasing a value??"),
+                (Some(_), None) => panic!("erasing values is not inteded to be possible"),
                 (_, Some(Err(error))) => {
                     tracing::debug!(
                         %node_id,
@@ -355,7 +400,7 @@ impl SystemAirDevice {
         Ok(())
     }
 
-    async fn handle_command(&mut self, command: Command) -> Result<(), ()> {
+    async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
         if self.state != HomieDeviceStatus::Ready {
             tracing::debug!(?command, "command ignored, device is not ready yet");
             return Ok(());
@@ -363,21 +408,21 @@ impl SystemAirDevice {
         match command {
             Command::Set { property, value } => {
                 if property.device_id() != self.protocol.device_ref().device_id() {
-                    return Err(()); // TODO
+                    return Err(Error::WrongDeviceId(property.device_id().clone()));
                 }
                 let Some(node) = self.nodes.get(property.node_id()) else {
-                    return Err(()); // TODO
+                    return Err(Error::UnknownNode(property.node_id().clone()));
                 };
                 let node_id = node.node_id().clone();
+                let prop_id = property.prop_id().clone();
                 let properties = node.properties();
                 let property = properties
                     .iter()
                     .enumerate()
                     .find(|(_, p)| &p.prop_id == property.prop_id());
                 let Some((prop_idx, property)) = property else {
-                    return Err(()); // TODO
+                    return Err(Error::UnknownProperty(node_id, prop_id));
                 };
-                let prop_id = property.prop_id.clone();
                 let Ok(value) = property.kind.value_from_homie(&value) else {
                     tracing::warn!(%node_id, %prop_id, value, "property/set could not be parsed");
                     let Some(Ok(old)) = property.kind.value_from_modbus(&self.modbus_values) else {
@@ -400,24 +445,24 @@ impl SystemAirDevice {
         Ok(())
     }
 
-    pub async fn step(&mut self) -> Result<(), ()> {
+    pub async fn step(&mut self) -> Result<(), Error> {
         loop {
             tracing::trace!(commands.len = self.commands.len(), "step");
             tokio::select! {
                 event = self.event_stream.next(), if !self.event_stream.is_empty() => {
                     let Some(read_event) = event else { continue };
-                    let result = read_event.expect("TODO");
+                    let result = read_event.map_err(Error::ModbusStreamError)?;
                     return self.handle_event_result(result).await;
                 },
                 command = self.commands.recv() => {
-                    let Some(command) = command else { todo!() };
+                    let Some(command) = command else { return Ok(()) };
                     return self.handle_command(command).await;
                 },
             }
         }
     }
 
-    async fn handle_event_result(&mut self, result: EventResult) -> Result<(), ()> {
+    async fn handle_event_result(&mut self, result: EventResult) -> Result<(), Error> {
         match result {
             EventResult::Periodic {
                 operation,
@@ -440,7 +485,8 @@ impl SystemAirDevice {
                 prop_idx,
                 why,
             } => {
-                let node = self.nodes.get(&node_id).unwrap();
+                let node = self.nodes.get(&node_id);
+                let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
                 let prop = &node.properties()[prop_idx];
                 tracing::error!(%node_id, prop_id = %prop.prop_id, why, "did not set property");
                 if let Some(Ok(old)) = prop.kind.value_from_modbus(&self.modbus_values) {
@@ -459,7 +505,8 @@ impl SystemAirDevice {
                 response: ResponseKind::ErrorCode(code),
             } => {
                 tracing::error!(code, ?operation, "modbus server exception occurred");
-                let node = self.nodes.get(&node_id).unwrap();
+                let node = self.nodes.get(&node_id);
+                let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
                 let prop = &node.properties()[prop_idx];
                 if let Some(Ok(old)) = prop.kind.value_from_modbus(&self.modbus_values) {
                     let r1 = self.handle_target_change(&node_id, prop_idx, &*old).await;
@@ -551,7 +598,9 @@ impl Command {
     pub(crate) fn try_from_mqtt_command(
         msg: rumqttc::v5::mqttbytes::v5::Publish,
     ) -> Result<Self, rumqttc::v5::mqttbytes::v5::Publish> {
-        let topic = str::from_utf8(&msg.topic).expect("TODO");
+        let Ok(topic) = str::from_utf8(&msg.topic) else {
+            return Err(msg);
+        };
         match homie5::parse_mqtt_message(topic, &msg.payload) {
             Ok(homie5::Homie5Message::PropertySet {
                 property,

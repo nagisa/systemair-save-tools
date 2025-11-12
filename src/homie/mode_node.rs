@@ -1,12 +1,12 @@
 use crate::homie::EventResult;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    homie_enum, string_enum, AggregatePropertyValue, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue, RemainingTimeValue, StopDelay, UintValue
+    AggregatePropertyValue, BooleanValue, CelsiusValue, RemainingTimeValue, UintValue, string_enum,
 };
 use crate::modbus;
 use crate::registers::{RegisterIndex, Value};
 use homie5::HomieID;
-use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
+use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -171,7 +171,6 @@ impl AggregatePropertyValue for CurrentMode {
 #[repr(u16)]
 #[derive(Copy, Clone)]
 enum RequestMode {
-    None = 0,
     Auto = 1,
     Manual = 2,
     Crowded = 3,

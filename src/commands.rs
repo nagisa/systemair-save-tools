@@ -401,7 +401,9 @@ pub mod write {
     pub enum Error {
         #[error("could not read back the written registers")]
         Readback(#[source] super::read::Error),
-        #[error("could not parse {0} into a register description and value to write (expected format `REG=VAL`)")]
+        #[error(
+            "could not parse {0} into a register description and value to write (expected format `REG=VAL`)"
+        )]
         RegisterMalformed(String),
         #[error("register address {0} is not known")]
         RegisterAddressUnknown(u16),
@@ -530,11 +532,23 @@ pub mod mqtt {
     }
 
     #[derive(thiserror::Error, Debug)]
-    pub enum Error {}
+    pub enum Error {
+        #[error("MQTT connection fault")]
+        MqttConnection(#[source] rumqttc::v5::ConnectionError),
+        #[error("could not progress the homie device")]
+        DeviceStep(#[source] crate::homie::Error),
+        #[error("could not publish/initialize the homie device")]
+        PublishHomieDevice(#[source] crate::homie::Error),
+        #[error("specified device name {1} is invalid")]
+        InvalidDeviceName(#[source] homie5::InvalidHomieIDError, String),
+        #[error("MQTT broker address {1} is not valid")]
+        InvalidBrokerAddress(#[source] rumqttc::v5::OptionError, String),
+    }
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn run(args: Args) -> Result<(), Error> {
-        let mut mqtt_options = MqttOptions::parse_url(&args.mqtt_broker).expect("TODO");
+        let mut mqtt_options = MqttOptions::parse_url(&args.mqtt_broker)
+            .map_err(|e| Error::InvalidBrokerAddress(e, args.mqtt_broker))?;
         if let Some((u, p)) = args
             .mqtt_user
             .as_ref()
@@ -545,10 +559,13 @@ pub mod mqtt {
 
         let connection = Arc::new(Connection::new(args.connection).await.unwrap());
 
-        let (protocol, last_will) = homie5::Homie5DeviceProtocol::new(
-            args.device_name.try_into().expect("TODO"),
-            homie5::HomieDomain::Default,
-        );
+        let device_name = args
+            .device_name
+            .clone()
+            .try_into()
+            .map_err(|e| Error::InvalidDeviceName(e, args.device_name))?;
+        let (protocol, last_will) =
+            homie5::Homie5DeviceProtocol::new(device_name, homie5::HomieDomain::Default);
         mqtt_options.set_last_will(LastWill::new(
             last_will.topic,
             last_will.message,
@@ -565,10 +582,10 @@ pub mod mqtt {
                 tokio::select! {
                     biased;
                     result = client_loop.poll() => {
-                        result.expect("TODO");
+                        result.map_err(Error::MqttConnection)?;
                     }
                     result = &mut publish_future => {
-                        break result.expect("TODO");
+                        break result.map_err(Error::PublishHomieDevice)?;
                     }
                 }
             }
@@ -576,16 +593,21 @@ pub mod mqtt {
         loop {
             let mqtt_event = tokio::select! {
                 biased;
-                result = client_loop.poll() => result.expect("TODO"),
+                result = client_loop.poll() => result.map_err(Error::MqttConnection)?,
                 result = device.step() => {
-                    result.expect("TODO");
+                    result.map_err(Error::DeviceStep)?;
                     continue;
                 }
             };
             match mqtt_event {
                 rumqttc::v5::Event::Incoming(Incoming::Publish(msg)) => {
                     match Command::try_from_mqtt_command(msg) {
-                        Ok(cmd) => command_tx.send(cmd).expect("TODO"),
+                        Ok(cmd) => {
+                            let Ok(()) = command_tx.send(cmd) else {
+                                tracing::warn!("command channel gone, terminating");
+                                break;
+                            };
+                        }
                         Err(unexpected) => {
                             tracing::warn!(?unexpected, "unexpected mqtt command received")
                         }
@@ -597,5 +619,6 @@ pub mod mqtt {
                 rumqttc::v5::Event::Outgoing(_) => {}
             }
         }
+        Ok(())
     }
 }

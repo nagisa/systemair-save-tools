@@ -146,7 +146,7 @@ impl Connection {
             }
             .spawn(jobs)
         } else if args.how.device.is_some() {
-            todo!()
+            todo!("direct Modbus RTU is not implemented yet");
         } else {
             panic!("both `--tcp` and `--device` are `None`?");
         };
