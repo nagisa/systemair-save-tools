@@ -8,6 +8,7 @@ use crate::registers::{RegisterIndex, Value};
 use homie5::HomieID;
 use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 super::node::properties! { static PROPERTIES = [
     // We don't support non-SI units currently. Anybody looking to use these are welcome to
@@ -151,6 +152,8 @@ impl AggregatePropertyValue for CurrentMode {
                         response: response.kind,
                     });
                 }
+                // Device takes a little bit of extra time to figure things out.
+                tokio::time::sleep(Duration::from_millis(1500)).await;
                 let start_register = RegisterIndex::from_name("USERMODE_REMAINING_TIME_L").unwrap();
                 let end_register = RegisterIndex::from_name("USERMODE_MODE").unwrap();
                 let address = start_register.address();

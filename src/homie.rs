@@ -53,6 +53,11 @@ pub(crate) enum EventResult {
     },
 }
 
+enum PublishProperty {
+    Always,
+    OnChange,
+}
+
 type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
 
 type ModbusReadStream = SelectAll<Pin<Box<ModbusStream>>>;
@@ -254,7 +259,7 @@ impl SystemAirDevice {
         &mut self,
         address: u16,
         values: Vec<u8>,
-        inhibit_change_handling: bool,
+        property_handling: impl Fn(&HomieID, usize) -> PublishProperty,
     ) -> Result<(), ()> {
         // This is somewhat awkward to write as we want our nodes to see a full atomic change to
         // the register value view, but we also want to have the old values to compare against.
@@ -331,11 +336,19 @@ impl SystemAirDevice {
                 }
             };
             if let Some(new) = new {
-                if !inhibit_change_handling && value_changed {
-                    self.handle_value_change(&node_id, prop_idx, &*new).await?;
-                }
-                if !inhibit_change_handling && target_changed {
-                    self.handle_target_change(&node_id, prop_idx, &*new).await?;
+                match property_handling(&node_id, prop_idx) {
+                    PublishProperty::Always => {
+                        self.handle_value_change(&node_id, prop_idx, &*new).await?;
+                        self.handle_target_change(&node_id, prop_idx, &*new).await?;
+                    }
+                    PublishProperty::OnChange => {
+                        if value_changed {
+                            self.handle_value_change(&node_id, prop_idx, &*new).await?;
+                        }
+                        if target_changed {
+                            self.handle_target_change(&node_id, prop_idx, &*new).await?;
+                        }
+                    }
                 }
             }
         }
@@ -417,8 +430,10 @@ impl SystemAirDevice {
                 operation: Operation::GetHoldings { address, count: _ },
                 response: ResponseKind::GetHoldings { values },
             } => {
-                self.handle_modbus_register_response(address, values, false)
-                    .await?;
+                self.handle_modbus_register_response(address, values, |_, _| {
+                    PublishProperty::OnChange
+                })
+                .await?;
             }
             EventResult::HomieNotSet {
                 node_id,
@@ -461,19 +476,14 @@ impl SystemAirDevice {
                 operation: Operation::GetHoldings { address, .. },
                 response: ResponseKind::GetHoldings { values },
             } => {
-                let r1 = self
-                    .handle_modbus_register_response(address, values, true)
-                    .await;
-                let node = self.nodes.get(&node_id).unwrap();
-                let prop = &node.properties()[prop_idx];
-                if let Some(Ok(new)) = prop.kind.value_from_modbus(&self.modbus_values) {
-                    let r2 = self.handle_target_change(&node_id, prop_idx, &*new).await;
-                    let r3 = self.handle_value_change(&node_id, prop_idx, &*new).await;
-                    r1.and(r2).and(r3)?;
-                } else {
-                    let prop_id = &prop.prop_id;
-                    tracing::debug!(%node_id, %prop_id, "failed to parse set value from modbus");
-                }
+                self.handle_modbus_register_response(address, values, |nid, pidx| {
+                    if prop_idx == pidx && nid == &node_id {
+                        PublishProperty::Always
+                    } else {
+                        PublishProperty::OnChange
+                    }
+                })
+                .await?;
             }
             EventResult::ActionResponse {
                 node_id,
