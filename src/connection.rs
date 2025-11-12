@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::Notify;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::error::SendError;
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 use tracing::{debug, info, trace, warn};
@@ -86,14 +86,14 @@ impl ResponseTracker {
 pub struct Args {
     #[clap(flatten)]
     how: ConnectionGroup,
-    /// If the response isn't received in this amount of time plus the expected internal read-out
-    /// time, consider the request failed.
+    /// If the modbus response isn't received in this amount of time plus the expected internal
+    /// read-out time, consider the request failed.
     ///
     /// Most of the commands will at that point attempt to retry the request.
     #[arg(long, default_value = "1s")]
     read_timeout: humantime::Duration,
 
-    /// Reconnect to the server after the specified number of requests timeout.
+    /// Reconnect to the modbus server after the specified number of requests timeout.
     #[arg(long, default_value = "3")]
     reconnect_after_timeouts: usize,
 
@@ -108,6 +108,13 @@ pub struct Args {
     /// Interacting too fast can make some Modbus TCP interfaces behave poorly.
     #[arg(long, default_value = "100ms")]
     tcp_send_delay: humantime::Duration,
+
+    /// The amount of additional time to wait after receiving a server busy exception.
+    ///
+    /// When busy, modbus proxies can respond with an exception code 6. Give the device
+    /// this amount of time to finish its current work before retrying.
+    #[arg(long, default_value = "25ms")]
+    server_busy_retry_delay: humantime::Duration,
 }
 
 #[derive(clap::Parser, Clone)]
@@ -130,6 +137,7 @@ pub struct Connection {
     pub response_tracker: Arc<ResponseTracker>,
     transaction_id_generator: std::sync::atomic::AtomicU16,
     device_id: u8,
+    server_busy_retry_delay: humantime::Duration,
 }
 
 impl Connection {
@@ -137,6 +145,7 @@ impl Connection {
         let (request_queue, jobs) = tokio::sync::mpsc::unbounded_channel();
         let response_tracker = Default::default();
         let device_id = args.how.device_id;
+        let server_busy_retry_delay = args.server_busy_retry_delay;
         let worker = if args.how.tcp.is_some() {
             TcpWorker {
                 reconnect_countdown: args.reconnect_after_timeouts,
@@ -156,6 +165,7 @@ impl Connection {
             response_tracker,
             transaction_id_generator: AtomicU16::new(0),
             device_id,
+            server_busy_retry_delay,
         })
     }
 
@@ -206,9 +216,7 @@ impl Connection {
             let Some(response) = response else { continue };
             if response.is_server_busy() {
                 // IAM was busy with other requests. Give it some time…
-                // TODO: maybe add a flag to control this?
-                // TODO: configurable retry sleep time?
-                tokio::time::sleep(Duration::from_millis(25)).await;
+                tokio::time::sleep(self.server_busy_retry_delay.into()).await;
                 continue;
             } else {
                 break Ok(response);
