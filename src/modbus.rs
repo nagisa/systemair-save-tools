@@ -47,7 +47,10 @@ impl Response {
         match &self.kind {
             ResponseKind::ErrorCode(c) => Some(*c),
             ResponseKind::GetHoldings { values: _ } => None,
-            ResponseKind::SetHoldings { address: _, words: _ } => None,
+            ResponseKind::SetHoldings {
+                address: _,
+                words: _,
+            } => None,
         }
     }
 
@@ -64,17 +67,16 @@ pub enum ResponseKind {
 }
 
 pub trait Codec:
-    for<'a> Encoder<&'a Request, Error = std::io::Error>
-    + Decoder<Item = Response, Error = std::io::Error>
+    Encoder<Request, Error = std::io::Error> + Decoder<Item = Response, Error = std::io::Error>
 {
 }
 
 pub struct ModbusTCPCodec {}
-impl Encoder<&Request> for ModbusTCPCodec {
+impl Encoder<Request> for ModbusTCPCodec {
     type Error = std::io::Error;
     fn encode(
         &mut self,
-        req: &Request,
+        req: Request,
         dst: &mut tokio_util::bytes::BytesMut,
     ) -> Result<(), Self::Error> {
         match &req.operation {
@@ -186,11 +188,11 @@ impl Decoder for ModbusTCPCodec {
 impl Codec for ModbusTCPCodec {}
 
 pub struct ModbusRTUCodec {}
-impl Encoder<&Request> for ModbusRTUCodec {
+impl Encoder<Request> for ModbusRTUCodec {
     type Error = std::io::Error;
     fn encode(
         &mut self,
-        _req: &Request,
+        _req: Request,
         _dst: &mut tokio_util::bytes::BytesMut,
     ) -> Result<(), Self::Error> {
         todo!()

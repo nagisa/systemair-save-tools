@@ -1,4 +1,4 @@
-use crate::modbus::{self, ModbusTCPCodec};
+use crate::modbus::{self, ModbusTCPCodec, Request};
 use futures::{SinkExt, StreamExt as _};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -6,7 +6,6 @@ use std::pin;
 use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -33,20 +32,6 @@ pub enum Error {
     Send(#[source] std::io::Error),
     #[error("could not flush out the request")]
     Flush(#[source] std::io::Error),
-}
-
-trait AsyncRW: AsyncRead + AsyncWrite {
-    async fn shutdown_write(&mut self) -> Result<(), std::io::Error>;
-}
-impl AsyncRW for tokio::net::TcpStream {
-    async fn shutdown_write(&mut self) -> Result<(), std::io::Error> {
-        self.shutdown().await
-    }
-}
-impl AsyncRW for tokio::fs::File {
-    async fn shutdown_write(&mut self) -> Result<(), std::io::Error> {
-        Ok(())
-    }
 }
 
 #[derive(Default)]
@@ -93,7 +78,11 @@ pub struct Args {
     #[arg(long, default_value = "1s")]
     read_timeout: humantime::Duration,
 
-    /// Reconnect to the modbus server after the specified number of requests timeout.
+    /// Reconnect, if the modbus request can't be sent in this amount of time.
+    #[arg(long, default_value = "3s")]
+    send_timeout: humantime::Duration,
+
+    /// Reconnect to the modbus server after the specified number of reads timeout.
     #[arg(long, default_value = "3")]
     reconnect_after_timeouts: usize,
 
@@ -265,7 +254,6 @@ struct TcpWorker {
 }
 
 type TcpIo = Framed<TcpStream, ModbusTCPCodec>;
-type PinnedSleep<'a> = pin::Pin<&'a mut tokio::time::Sleep>;
 
 impl TcpWorker {
     fn spawn(
@@ -279,28 +267,49 @@ impl TcpWorker {
         mut self,
         mut jobs: UnboundedReceiver<modbus::Request>,
     ) -> Result<(), Error> {
+        // FIXME: shouldn't await here, these should be part of select!
+        // somehow.
         'reconnect: loop {
             // If we are reconnecting and had any in-flight requests, it is only proper to report
             // them as timed out.
             for (transaction_id, _) in self.inflight.drain(..) {
                 self.responses.mark_timeout(transaction_id);
             }
-            let mut io = self.connect().await?;
+            let (mut io_sink, mut io_source) = self.connect().await?.split();
             let mut send_time = pin::pin!(tokio::time::sleep_until(Instant::now()));
-            let mut request_timeout = pin::pin!(tokio::time::sleep_until(Instant::now()));
+            let mut recv_time = pin::pin!(tokio::time::sleep_until(Instant::now()));
+            let mut pending_send = None;
             loop {
                 let time_to_send = send_time.is_elapsed();
                 tokio::select! {
                     biased;
-                    Some(response) = io.next() => {
+                    send_result = io_sink.flush(), if pending_send.is_some() => {
+                        let req: Request = pending_send.take().unwrap();
+                        if let Err(e) = send_result {
+                            warn!(
+                                message="sending request failed, will reconnect",
+                                error=(&e as &dyn std::error::Error)
+                            );
+                            continue 'reconnect;
+                        }
+                        let resp_len = req.expected_response_length().into();
+                        let baudrate = self.args.baudrate;
+                        let response_duration = Duration::from_secs(resp_len) / (baudrate / 10);
+                        let response_ready_instant = Instant::now() + response_duration;
+                        let response_deadline = response_ready_instant + *self.args.read_timeout;
+                        self.inflight
+                            .push_back((req.transaction_id, response_deadline));
+                        recv_time.as_mut().reset(self.inflight[0].1);
+                        send_time.as_mut().reset(response_ready_instant + *self.args.tcp_send_delay);
+                    }
+                    Some(response) = io_source.next() => {
                         match response {
                             Err(e) => return Err(Error::Receive(e)),
                             Ok(response) => self.handle_response(response, send_time.as_mut()),
                         }
                     }
-
-                    _ = &mut request_timeout, if !self.inflight.is_empty() => {
-                        if !self.handle_timeout(request_timeout.as_mut()) {
+                    _ = &mut recv_time, if !self.inflight.is_empty() => {
+                        if !self.handle_timeout(recv_time.as_mut()) {
                             continue 'reconnect;
                         }
                     }
@@ -311,30 +320,25 @@ impl TcpWorker {
                     //
                     // This conditional select will make sure that we will always wait sleeping
                     // until the next available sending slot opens up.
-                    _ = &mut send_time, if !time_to_send => {}
-
-                    job = jobs.recv(), if time_to_send => {
+                    _ = &mut send_time, if pending_send.is_some() || !time_to_send => {
+                        if pending_send.is_some() {
+                            warn!("sending a request timed out, will reconnect");
+                            continue 'reconnect;
+                        }
+                    }
+                    job = jobs.recv(), if time_to_send && pending_send.is_none() => {
                         match job {
                             None => {
-                                io.get_mut().shutdown_write().await.map_err(Error::Shutdown)?;
+                                io_sink.close().await.map_err(Error::Shutdown)?;
                                 if self.inflight.is_empty() {
                                     return Ok(());
                                 }
                             },
                             Some(req) => {
-                                let result = self.send(
-                                    req,
-                                    &mut io,
-                                    send_time.as_mut(),
-                                    request_timeout.as_mut()
-                                ).await;
-                                if let Err(e) = result {
-                                    warn!(
-                                        message="sending request failed, will reconnect",
-                                        error=(&e as &dyn std::error::Error)
-                                    );
-                                    continue 'reconnect;
-                                }
+                                // While we're sending, use `send_time` to track send timeout.
+                                send_time.as_mut().reset(Instant::now() + *self.args.send_timeout);
+                                io_sink.feed(req.clone()).await.map_err(Error::Send)?;
+                                assert!(pending_send.replace(req).is_none());
                             }
                         }
                     },
@@ -359,28 +363,6 @@ impl TcpWorker {
         info!(message = "connected");
         self.reconnect_countdown = self.args.reconnect_after_timeouts;
         Ok(Framed::new(socket, ModbusTCPCodec {}))
-    }
-
-    async fn send(
-        &mut self,
-        request: modbus::Request,
-        io: &mut TcpIo,
-        send_time: PinnedSleep<'_>,
-        request_timeout: PinnedSleep<'_>,
-    ) -> Result<(), Error> {
-        let response_time = Duration::from_secs(request.expected_response_length().into())
-            / (self.args.baudrate / 10);
-        let response_ready_time = Instant::now() + response_time;
-        let response_deadline = response_ready_time + *self.args.read_timeout;
-        self.inflight
-            .push_back((request.transaction_id, response_deadline));
-        send_time.reset(response_ready_time + *self.args.tcp_send_delay);
-        request_timeout.reset(self.inflight[0].1);
-        // FIXME: shouldn't await here, these should be part of select!
-        // somehow.
-        io.send(&request).await.map_err(Error::Send)?;
-        io.flush().await.map_err(Error::Flush)?;
-        Ok(())
     }
 
     fn handle_response(
