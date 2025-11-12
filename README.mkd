@@ -7,9 +7,9 @@
 
 </div>
 
-> [!WARNING]
-> This project is work in progress and the description below is a future-looking end goal for this
-> project. Not every feature described below is implemented yet. Any help is greatly appreciated!
+> [!NOTE]
+> This project is work in progress although most of the interesting functionality is serviceable
+> for most of the use-cases!
 
 This package provides a collection of tools to operate [Systemair SAVE air heat recovery
 units][mfct]. The tools range from as simple as printing the documented and undocumented Modbus
@@ -22,10 +22,135 @@ as OpenHAB, Home Assistant or NodeRED.
 [mfct]: https://www.systemair.com/en/products/residential-ventilation-systems/air-handling-units/save
 
 The tool collection is available as a standalone, dependency-free executable download for the three
-major platforms (Windows, MacOS, Linux.)
+major platforms (Windows, MacOS, Linux.) Note, however, that this is a CLI tool and will require
+you to use a terminal to use it.
 
 Currently communication over TCP via the SystemAIR IAM module or another Modbus gateway is
 supported.
+
+## Usage
+
+> [!NOTE]
+> This section is a snapshot of the tool's functionality at the time this section was written. It
+> might not be up-to date! Run the referenced commands yourself to see an up-to-date output!
+
+```command
+$ ./systemair-save-tools help
+
+Usage: systemair-save-tools <COMMAND>
+
+Commands:
+  registers  Search and output known modbus registers
+  read       Read the value stored in the specified register
+  write      Write the values into specified registers
+  mqtt       Start a SystemAIR to MQTT proxy which exposes a homie interface to the HVAC device
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### systemair2mqtt tool
+
+As the description specifies, most home automation use-cases would use this tool running
+persistently on some machine to produce a [homie convention][homie] compatible MQTT interface to
+the SystemAIR device. Home Assistant, OpenHAB and similar tools should be able to automatically
+discover the published device.
+
+The goal of the published MQTT homie device is to provide a good coverage of functions and settings
+that would otherwise be available through the cloud interface or the panel.
+
+This tool is configured through the command-line arguments which you can find out by running
+`systemair-save-tools mqtt --help`.
+
+> [!NOTE]
+> As of writing the tool expects the device to be configured in certain ways in order to work
+> correctly. In particular it currently assumes that the device is configured to use SI units
+> (registers `SYSTEM_UNIT_FLOW`, `SYSTEM_UNIT_PRESSURE`, `SYSTEM_UNIT_TEMPERATURE`,) and that there
+> are no locks/passwords. The tool will most likely still work for certain operations, but you may
+> see weird issues such as wrong units for temperature values or configuration not applying.
+>
+> You can adjust the necessary options and/or lock/unlock via direct register configuration.
+
+[homie]: https://homieiot.github.io/specification/
+
+### Registers, reading and writing
+
+For a low-level access to and configuration of the device you can use `registers`, `read` and
+`write` subcommands. `registers` prints out the list of registers, their descriptions, addresses
+and other miscellaneous information. For example:
+
+```
+$ systemair-save-tools registers LOCK
++---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------+
+| Address | Name                          | Mode | Type | Scale | Min | Max | Description                                  |
++==========================================================================================================================+
+| 2316    | COOLER_OAT_INTERLOCK_T        | RW   | i16  | 10    | 12  | 25  | Temperature at which cooling is interlocked  |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 3111    | FUNCTION_ACTIVE_USER_LOCK     | R-   | u16  | 1     |     |     | Is the function currently active?            |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16002   | LOCKED_USER                   | RW   | u16  | 1     | 0   | 1   | Indicates if the User level is locked.       |
+|         |                               |      |      |       |     |     | 0=User menu locked, 1=User menu not locked   |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16003   | LOCKED_FILTER                 | RW   | u16  | 1     | 0   | 1   | Indicates if the Filter menu is locked.      |
+|         |                               |      |      |       |     |     | 0=menu locked, 1=menu not locked             |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16004   | LOCKED_WEEK_SCHEDULE          | RW   | u16  | 1     | 0   | 1   | Indicates if the Week schedule menu is       |
+|         |                               |      |      |       |     |     | locked. 0=menu locked, 1=menu not locked     |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16051   | PASSWD_USER_LEVEL_REQUIRED    | RW   | u16  | 1     | 0   | 1   | Home screen lock                             |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16052   | PASSWD_FILTER_REQUIRED        | RW   | u16  | 1     | 0   | 1   | Filter Change menu lock                      |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16053   | PASSWD_WEEK_SCHEDULE_REQUIRED | RW   | u16  | 1     | 0   | 1   | Week schedule menu lock                      |
+|---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------|
+| 16062   | PASSWD_PC_UNLOCKED            | R-   | u16  | 1     | 0   | 1   |                                              |
++---------+-------------------------------+------+------+-------+-----+-----+----------------------------------------------+
+```
+
+or in a machine-readable format:
+
+```
+$ systemair-save-tools registers LOCK -f jsonl
+{"address":2316,"name":"COOLER_OAT_INTERLOCK_T","mode":"RW","signed":true,"scale":10,"minimum":12.0,"maximum":25.0,"description":"Temperature at which cooling is interlocked"}
+{"address":3111,"name":"FUNCTION_ACTIVE_USER_LOCK","mode":"R-","signed":false,"scale":1,"minimum":null,"maximum":null,"description":"Is the function currently active?"}
+{"address":16002,"name":"LOCKED_USER","mode":"RW","signed":false,"scale":1,"minimum":0,"maximum":1,"description":"Indicatesif the User level is locked. 0=User menu locked, 1=User menu not locked"}
+{"address":16003,"name":"LOCKED_FILTER","mode":"RW","signed":false,"scale":1,"minimum":0,"maximum":1,"description":"Indicates if the Filter menu is locked. 0=menu locked, 1=menu not locked"}
+{"address":16004,"name":"LOCKED_WEEK_SCHEDULE","mode":"RW","signed":false,"scale":1,"minimum":0,"maximum":1,"description":"Indicates if the Week schedule menu is locked. 0=menu locked, 1=menu not locked"}
+{"address":16051,"name":"PASSWD_USER_LEVEL_REQUIRED","mode":"RW","signed":false,"scale":1,"minimum":0,"maximum":1,"description":"Home screen lock"}
+{"address":16052,"name":"PASSWD_FILTER_REQUIRED","mode":"RW","signed":false,"scale":1,"minimum":0,"maximum":1,"description":"Filter Change menu lock"}
+{"address":16053,"name":"PASSWD_WEEK_SCHEDULE_REQUIRED","mode":"RW","signed":false,"scale":1,"minimum":0,"maximum":1,"description":"Week schedule menu lock"}
+{"address":16062,"name":"PASSWD_PC_UNLOCKED","mode":"R-","signed":false,"scale":1,"minimum":0,"maximum":1,"description":""}
+```
+
+Registers can be read for example as such:
+
+```
+$ systemair-save-tools read --tcp 'device:502' --device-id=1 TC_SP 1001..1003
++-------+---------+------------------+----------+
+| Tx ID | Address | Name             | Response |
++===============================================+
+| 0     | 2001    | TC_SP            | 22.5     |
+|-------+---------+------------------+----------|
+| 1     | 1001    | DEMC_RH_HIGHEST  | 55       |
+|-------+---------+------------------+----------|
+| 1     | 1002    | DEMC_CO2_HIGHEST | 674      |
++-------+---------+------------------+----------+
+```
+
+or written like this:
+
+```
+$ systemair-save-tools write --tcp 'device:502' --device-id=1 TC_SP=22.5
++-------+---------+-------+----------+
+| Tx ID | Address | Name  | Response |
++====================================+
+| 1     | 2001    | TC_SP | 22.5     |
++-------+---------+-------+----------+
+```
+
+Much like with register tables, machine readable output is available via `-f`.
 
 ## Disclaimers
 
