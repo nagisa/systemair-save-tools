@@ -289,23 +289,11 @@ pub mod read {
             .map(|read_request| {
                 let connection = &connection;
                 Ok::<_, Error>(async move {
-                    loop {
-                        let outcome = connection
-                            .send(read_request.to_operation())
-                            .await
-                            .map_err(Error::Communicate)?;
-                        let Some(result) = outcome else {
-                            continue;
-                        };
-                        if result.is_server_busy() {
-                            // IAM was busy with other requests. Give it some time…
-                            // TODO: maybe add a flag to control this?
-                            // TODO: configurable retries, sleep time?
-                            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                            continue;
-                        }
-                        return Ok::<_, Error>((read_request, result));
-                    }
+                    let outcome = connection
+                        .send_retrying(read_request.to_operation())
+                        .await
+                        .map_err(Error::Communicate)?;
+                    return Ok::<_, Error>((read_request, outcome));
                 })
             })
             .try_buffered(2);
