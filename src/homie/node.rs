@@ -1,6 +1,7 @@
 use crate::connection::Connection;
 use crate::homie::value::{
-    ActionPropertyValue, AggregatePropertyValue, DynPropertyValue, PropertyValue, RegisterPropertyValue
+    ActionPropertyValue, AggregatePropertyValue, DynPropertyValue, PropertyValue,
+    RegisterPropertyValue,
 };
 use crate::homie::{EventResult, ModbusStream};
 use crate::modbus;
@@ -90,13 +91,13 @@ where
                 });
             }
             let operation = modbus::Operation::GetHoldings { address, count: 1 };
-            let response = modbus.send_retrying(operation.clone()).await?;
-            return Ok(EventResult::HomieSet {
+            let response = modbus.send_retrying(operation.clone()).await?.kind;
+            Ok(EventResult::HomieSet {
                 node_id,
                 prop_idx,
                 operation,
-                response: response.kind,
-            });
+                response,
+            })
         })) as _
     }
 

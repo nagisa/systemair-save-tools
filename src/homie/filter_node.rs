@@ -123,7 +123,9 @@ impl ActionPropertyValue for ReplaceAction {
             let address = register.address();
             let operation = modbus::Operation::SetHoldings { address, values: vec![1] };
             let _response = modbus.send_retrying(operation.clone()).await?.kind;
-            // FIXME: what if response has a server exception?
+            // SUBTLE: _response could be a server exception. We still signal to the action invoker
+            // that we received the command. They will be able to tell if this had a desired effect
+            // by our later reading out holding registers below.
             yield Ok(EventResult::ActionResponse {
                 node_id: node_id.clone(),
                 prop_idx,
@@ -131,8 +133,6 @@ impl ActionPropertyValue for ReplaceAction {
             });
             let operation = modbus::Operation::GetHoldings { address, count: 3 };
             let response = modbus.send_retrying(operation.clone()).await?.kind;
-            let prop_idx = 1;
-            assert_eq!(PROPERTIES[prop_idx].prop_id.as_str(), "remaining-time");
             yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
         })
     }

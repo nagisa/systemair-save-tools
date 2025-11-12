@@ -215,13 +215,16 @@ impl Connection {
             let response = self.send(operation.clone()).await?;
             let Some(response) = response else { continue };
             if response.is_server_busy() {
-                // IAM was busy with other requests. Give it some time…
-                tokio::time::sleep(self.server_busy_retry_delay.into()).await;
+                self.handle_server_busy().await;
                 continue;
             } else {
                 break Ok(response);
             }
         }
+    }
+
+    pub async fn handle_server_busy(&self) {
+        tokio::time::sleep(self.server_busy_retry_delay.into()).await;
     }
 }
 

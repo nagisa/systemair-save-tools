@@ -13,7 +13,6 @@ use homie5::device_description::{
 use homie5::{HomieDataType, HomieID};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 super::node::properties! { static PROPERTIES = [
     { "clock": ClockValue = aggregate
@@ -134,8 +133,6 @@ impl AggregatePropertyValue for ClockValue {
                     response: response.kind,
                 });
             }
-            // immediately after setting time reload the clock so it also gets reported straight
-            // away.
             let operation = modbus::Operation::GetHoldings { address, count: 6 };
             let response = modbus.send_retrying(operation.clone()).await?.kind;
             yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
@@ -194,10 +191,9 @@ impl ActionPropertyValue for SynchronizeClockValue {
                 let response = modbus.send(operation.clone()).await?;
                 let Some(response) = response else { continue };
                 if response.is_server_busy() {
-                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    modbus.handle_server_busy().await;
                     continue;
                 } else {
-                    // FIXME: what if response has a server exception?
                     break Ok(EventResult::ActionResponse {
                         node_id: node_id.clone(),
                         prop_idx,
@@ -205,12 +201,8 @@ impl ActionPropertyValue for SynchronizeClockValue {
                     });
                 }
             };
-            // immediately after setting time reload the clock so it also gets reported straight
-            // away.
             let operation = modbus::Operation::GetHoldings { address, count: 6 };
             let response = modbus.send_retrying(operation.clone()).await?.kind;
-            let prop_idx = 0;
-            assert_eq!(PROPERTIES[prop_idx].prop_id.as_str(), "clock");
             yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
         })
     }
