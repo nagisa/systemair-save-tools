@@ -46,6 +46,7 @@ impl Node for CompensationNode {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum CompensationType {

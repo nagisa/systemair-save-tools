@@ -1,6 +1,6 @@
 use crate::connection::Connection;
 use crate::homie::value::{
-    ActionPropertyValue, DynPropertyValue, PropertyValue, RegisterPropertyValue,
+    ActionPropertyValue, AggregatePropertyValue, DynPropertyValue, PropertyValue, RegisterPropertyValue
 };
 use crate::homie::{EventResult, ModbusStream};
 use crate::modbus;
@@ -73,14 +73,12 @@ where
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>> {
-        tracing::warn!("here?!");
         let address = self.register.address();
         let value = (value as Box<dyn std::any::Any>)
             .downcast::<T>()
             .expect("type confusion");
         let values = vec![value.to_modbus()];
         Box::pin(futures::stream::once(async move {
-            tracing::warn!("setting!");
             let operation = modbus::Operation::SetHoldings { address, values };
             let response = modbus.send_retrying(operation.clone()).await?;
             if response.exception_code().is_some() {
@@ -151,7 +149,7 @@ pub(crate) struct AggregatePropertyKind<T> {
 
 impl<T> PropertyKind for AggregatePropertyKind<T>
 where
-    T: PropertyValue + 'static,
+    T: PropertyValue + AggregatePropertyValue + 'static,
     T: for<'a> TryFrom<&'a str>,
 {
     fn registers(&self) -> &[RegisterIndex] {
@@ -172,16 +170,23 @@ where
 
     fn homie_set_to_modbus(
         &self,
-        _node_id: HomieID,
-        _prop_idx: usize,
-        _modbus: Arc<Connection>,
-        _value: Box<DynPropertyValue>,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        value: Box<DynPropertyValue>,
     ) -> Pin<Box<ModbusStream>> {
-        todo!()
+        if !T::SETTABLE {
+            panic!("should never call homie_set_to_modbus for aggregates that aren't settable");
+        }
+        let value = (value as Box<dyn std::any::Any>)
+            .downcast::<T>()
+            .expect("type confusion");
+        value.set(node_id, prop_idx, modbus)
     }
 
     fn adjust_description(&self, description: &mut HomiePropertyDescription) {
         description.retained = true;
+        description.settable = T::SETTABLE;
     }
 }
 

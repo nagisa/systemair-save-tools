@@ -1,7 +1,8 @@
 use crate::connection::Connection;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    string_enum, ActionPropertyValue, BooleanValue, PropertyDescription, PropertyValue,
+    string_enum, ActionPropertyValue, AggregatePropertyValue, BooleanValue, PropertyDescription,
+    PropertyValue,
 };
 use crate::homie::EventResult;
 use crate::modbus;
@@ -60,6 +61,7 @@ impl Node for ClockNode {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum Weekday {
@@ -74,6 +76,7 @@ string_enum! {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum DaylightMode {
@@ -99,6 +102,44 @@ impl ClockValue {
 impl PropertyValue for ClockValue {
     fn value(&self) -> String {
         self.0.to_string()
+    }
+}
+impl AggregatePropertyValue for ClockValue {
+    const SETTABLE: bool = true;
+    fn set(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+        let address = const { RegisterIndex::from_name("TIME_YEAR").unwrap().address() };
+        let values = vec![
+            self.0.year() as u16,
+            self.0.month() as u16,
+            self.0.day() as u16,
+            self.0.hour() as u16,
+            self.0.minute() as u16,
+            self.0.second() as u16,
+        ];
+        Box::pin(async_stream::stream! {
+            let operation = modbus::Operation::SetHoldings { address, values };
+            // Don't bother checking for the result as any failures here (timeouts, server
+            // exceptions, etc.) likely make the value we wanted to set outdated.
+            let response = modbus.send(operation.clone()).await?;
+            if let Some(response) = response && response.exception_code().is_some() {
+                yield Ok(EventResult::HomieSet {
+                    node_id: node_id.clone(),
+                    prop_idx,
+                    operation: operation.clone(),
+                    response: response.kind,
+                });
+            }
+            // immediately after setting time reload the clock so it also gets reported straight
+            // away.
+            let operation = modbus::Operation::GetHoldings { address, count: 6 };
+            let response = modbus.send_retrying(operation.clone()).await?.kind;
+            yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
+        })
     }
 }
 impl PropertyDescription for ClockValue {
@@ -198,6 +239,17 @@ impl PropertyValue for UptimeValue {
         let start = jiff::Timestamp::from_second(self.start_time as i64).unwrap();
         let duration = current.duration_since(start);
         duration.to_string()
+    }
+}
+impl AggregatePropertyValue for UptimeValue {
+    const SETTABLE: bool = false;
+    fn set(
+        &self,
+        _: HomieID,
+        _: usize,
+        _: Arc<Connection>,
+    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+        unreachable!("uptime is not settable");
     }
 }
 impl PropertyDescription for UptimeValue {

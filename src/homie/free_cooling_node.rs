@@ -1,10 +1,12 @@
+use crate::homie::EventResult;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue,
+    AggregatePropertyValue, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue,
 };
+use crate::modbus;
 use crate::registers::Value;
-use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
 use homie5::HomieID;
+use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
@@ -63,6 +65,35 @@ impl PropertyValue for TimeValue {
         format!("T{}", self.0)
     }
 }
+impl AggregatePropertyValue for TimeValue {
+    const SETTABLE: bool = true;
+    fn set(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: std::sync::Arc<crate::connection::Connection>,
+    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+        let register = PROPERTIES[prop_idx].kind.registers()[0];
+        let address = register.address();
+        let values = vec![self.0.hour() as u16, self.0.minute() as u16];
+        Box::pin(async_stream::stream! {
+            let operation = modbus::Operation::SetHoldings { address, values };
+            let response = modbus.send_retrying(operation.clone()).await?;
+            if response.exception_code().is_some() {
+                yield Ok(EventResult::HomieSet {
+                    node_id: node_id.clone(),
+                    prop_idx,
+                    operation: operation,
+                    response: response.kind,
+                });
+            }
+            let operation = modbus::Operation::GetHoldings { address, count: 2 };
+            let response = modbus.send_retrying(operation.clone()).await?.kind;
+            yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
+        })
+    }
+}
+
 impl PropertyDescription for TimeValue {
     fn description(_prop: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
         PropertyDescriptionBuilder::new(homie5::HomieDataType::Datetime)

@@ -9,8 +9,8 @@ mod free_cooling_node;
 mod heat_exchanger_node;
 mod heater_node;
 mod mode_node;
-mod temperature_controller_node;
 mod node;
+mod temperature_controller_node;
 mod value;
 
 use crate::connection::{self, Connection};
@@ -34,6 +34,11 @@ pub(crate) enum EventResult {
     Periodic {
         operation: Operation,
         response: ResponseKind,
+    },
+    HomieNotSet {
+        node_id: HomieID,
+        prop_idx: usize,
+        why: &'static str,
     },
     HomieSet {
         node_id: HomieID,
@@ -414,6 +419,23 @@ impl SystemAirDevice {
             } => {
                 self.handle_modbus_register_response(address, values, false)
                     .await?;
+            }
+            EventResult::HomieNotSet {
+                node_id,
+                prop_idx,
+                why,
+            } => {
+                let node = self.nodes.get(&node_id).unwrap();
+                let prop = &node.properties()[prop_idx];
+                tracing::error!(%node_id, prop_id = %prop.prop_id, why, "did not set property");
+                if let Some(Ok(old)) = prop.kind.value_from_modbus(&self.modbus_values) {
+                    let r1 = self.handle_target_change(&node_id, prop_idx, &*old).await;
+                    let r2 = self.handle_value_change(&node_id, prop_idx, &*old).await;
+                    r1.and(r2)?;
+                } else {
+                    let prop_id = &prop.prop_id;
+                    tracing::debug!(%node_id, %prop_id, "failed to parse old value from modbus");
+                }
             }
             EventResult::HomieSet {
                 node_id,

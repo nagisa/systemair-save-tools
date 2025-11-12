@@ -56,6 +56,16 @@ pub(crate) trait ActionPropertyValue {
     ) -> Pin<Box<ModbusStream>>;
 }
 
+pub(crate) trait AggregatePropertyValue {
+    const SETTABLE: bool;
+    fn set(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+    ) -> Pin<Box<ModbusStream>>;
+}
+
 pub(crate) trait PropertyDescription {
     fn description(prop: &PropertyEntry) -> HomiePropertyDescription;
 }
@@ -204,7 +214,9 @@ impl TryFrom<&str> for StopDelay {
         let span = value.parse::<jiff::Span>()?;
         let minutes = span.total(jiff::Unit::Minute)?;
         if minutes < 0.0 || minutes > 20.0 {
-            return Err(jiff::Error::from_args(format_args!("pump stop delay out of range")));
+            return Err(jiff::Error::from_args(format_args!(
+                "pump stop delay out of range"
+            )));
         }
         Ok(Self(minutes.round() as u16))
     }
@@ -221,13 +233,26 @@ impl RemainingTimeValue {
         let seconds_remaining = u32::from(h.into_inner()) << 16 | u32::from(l.into_inner());
         let span = jiff::Span::new().seconds(seconds_remaining);
         let now = jiff::Zoned::now();
-        let round_cfg = jiff::SpanRound::new().largest(jiff::Unit::Month).relative(&now);
+        let round_cfg = jiff::SpanRound::new()
+            .largest(jiff::Unit::Month)
+            .relative(&now);
         Ok(Self(span.round(round_cfg).map_err(|_| ())?))
     }
 }
 impl PropertyValue for RemainingTimeValue {
     fn value(&self) -> String {
         self.0.to_string()
+    }
+}
+impl AggregatePropertyValue for RemainingTimeValue {
+    const SETTABLE: bool = false;
+    fn set(
+        &self,
+        _: HomieID,
+        _: usize,
+        _: Arc<Connection>,
+    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+        unreachable!("remaining time is computed and not settable");
     }
 }
 impl PropertyDescription for RemainingTimeValue {
@@ -243,9 +268,9 @@ impl TryFrom<&str> for RemainingTimeValue {
     }
 }
 
-
 macro_rules! string_enum {
     (
+        #[impl($($impl:ident),*)]
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
             $($variant:ident = $value:literal),* $(,)?
@@ -265,27 +290,34 @@ macro_rules! string_enum {
             $($variant = $value),*
         }
 
+        $($crate::homie::value::string_enum!(@impl $impl for $name);)*
+    };
+    (@impl TryFromValue for $name:ident) => {
         impl TryFrom<Value> for $name {
             type Error = ();
             fn try_from(value: crate::registers::Value) -> Result<Self, Self::Error> {
                 Self::from_repr(value.into_inner()).ok_or(())
             }
         }
-
+    };
+    (@impl PropertyValue for $name:ident) => {
         impl $crate::homie::value::PropertyValue for $name {
             fn value(&self) -> String {
                 <&'static str>::from(self).to_string()
             }
         }
-
+    };
+    (@impl RegisterPropertyValue for $name:ident) => {
         impl $crate::homie::value::RegisterPropertyValue for $name {
             fn to_modbus(&self) -> u16 {
                 *self as u16
             }
         }
-
+    };
+    (@impl PropertyDescription for $name:ident) => {
         impl $crate::homie::value::PropertyDescription for $name {
-            fn description(prop: &$crate::homie::node::PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
+            fn description(prop: &$crate::homie::node::PropertyEntry)
+            -> homie5::device_description::HomiePropertyDescription {
                 $crate::homie::value::homie_enum::<Self>(prop).build()
             }
         }

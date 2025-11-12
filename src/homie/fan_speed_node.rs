@@ -116,6 +116,7 @@ impl Node for FanSpeedSettingsNode {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum AirflowLevel {
@@ -129,6 +130,7 @@ string_enum! {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum WeeklyScheduleLevel {
@@ -142,6 +144,7 @@ string_enum! {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum RegulationType {

@@ -1,11 +1,12 @@
+use crate::homie::EventResult;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    string_enum, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue,
-    RegisterPropertyValue, RemainingTimeValue, StopDelay, UintValue,
+    homie_enum, string_enum, AggregatePropertyValue, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue, RemainingTimeValue, StopDelay, UintValue
 };
-use crate::registers::Value;
-use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
+use crate::modbus;
+use crate::registers::{RegisterIndex, Value};
 use homie5::HomieID;
+use homie5::device_description::{HomieNodeDescription, PropertyDescriptionBuilder};
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
@@ -84,6 +85,7 @@ impl Node for ModeNode {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Copy, Clone)]
     enum CurrentMode {
@@ -106,6 +108,60 @@ string_enum! {
 impl CurrentMode {
     fn new(value: Value) -> Result<Self, ()> {
         value.try_into()
+    }
+}
+
+// This is using the `AggregatePropertyValue` as the writes go to a different
+// register and use different underlying modbus values.
+impl AggregatePropertyValue for CurrentMode {
+    const SETTABLE: bool = true;
+    fn set(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: std::sync::Arc<crate::connection::Connection>,
+    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+        let value = match self {
+            CurrentMode::Auto => Some(RequestMode::Auto),
+            CurrentMode::Manual => Some(RequestMode::Manual),
+            CurrentMode::Crowded => Some(RequestMode::Crowded),
+            CurrentMode::Refresh => Some(RequestMode::Refresh),
+            CurrentMode::Fireplace => Some(RequestMode::Fireplace),
+            CurrentMode::Away => Some(RequestMode::Away),
+            CurrentMode::Holiday => Some(RequestMode::Holiday),
+            CurrentMode::CookerHood => None,
+            CurrentMode::VacuumCleaner => None,
+            CurrentMode::ConfigurableDigitalInput1 => None,
+            CurrentMode::ConfigurableDigitalInput2 => None,
+            CurrentMode::ConfigurableDigitalInput3 => None,
+            CurrentMode::PressureGuard => None,
+        };
+        Box::pin(async_stream::stream! {
+            if let Some(value) = value {
+                let register = RegisterIndex::from_name("USERMODE_HMI_CHANGE_REQUEST").unwrap();
+                let address = register.address();
+                let values = vec![value as u16];
+                let operation = modbus::Operation::SetHoldings { address, values };
+                let response = modbus.send_retrying(operation.clone()).await?;
+                if response.exception_code().is_some() {
+                    yield Ok(EventResult::HomieSet {
+                        node_id: node_id.clone(),
+                        prop_idx,
+                        operation,
+                        response: response.kind,
+                    });
+                }
+                let start_register = RegisterIndex::from_name("USERMODE_REMAINING_TIME_L").unwrap();
+                let end_register = RegisterIndex::from_name("USERMODE_MODE").unwrap();
+                let address = start_register.address();
+                let count = end_register.address() - address + 1;
+                let operation = modbus::Operation::GetHoldings { address, count };
+                let response = modbus.send_retrying(operation.clone()).await?.kind;
+                yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
+            } else {
+                yield Ok(EventResult::HomieNotSet { node_id, prop_idx, why: "unsupported mode" });
+            };
+        })
     }
 }
 

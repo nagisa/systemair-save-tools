@@ -60,6 +60,7 @@ impl Node for DemandControlNode {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum Season {
@@ -69,6 +70,7 @@ string_enum! {
 }
 
 string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum IaqLevel {
