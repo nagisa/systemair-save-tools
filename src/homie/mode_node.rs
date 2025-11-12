@@ -121,7 +121,7 @@ impl AggregatePropertyValue for CurrentMode {
         node_id: HomieID,
         prop_idx: usize,
         modbus: std::sync::Arc<crate::connection::Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         let value = match self {
             CurrentMode::Auto => Some(RequestMode::Auto),
             CurrentMode::Manual => Some(RequestMode::Manual),

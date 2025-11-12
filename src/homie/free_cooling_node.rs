@@ -72,7 +72,7 @@ impl AggregatePropertyValue for TimeValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: std::sync::Arc<crate::connection::Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         let register = PROPERTIES[prop_idx].kind.registers()[0];
         let address = register.address();
         let values = vec![self.0.hour() as u16, self.0.minute() as u16];

@@ -117,7 +117,7 @@ impl ActionPropertyValue for ReplaceAction {
         node_id: HomieID,
         prop_idx: usize,
         modbus: std::sync::Arc<crate::connection::Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         Box::pin(async_stream::stream! {
             let register = const { RegisterIndex::from_name("FILTER_PERIOD_SET").unwrap() };
             let address = register.address();

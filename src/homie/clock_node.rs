@@ -1,10 +1,10 @@
 use crate::connection::Connection;
+use crate::homie::EventResult;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    string_enum, ActionPropertyValue, AggregatePropertyValue, BooleanValue, PropertyDescription,
-    PropertyValue,
+    ActionPropertyValue, AggregatePropertyValue, BooleanValue, PropertyDescription, PropertyValue,
+    string_enum,
 };
-use crate::homie::EventResult;
 use crate::modbus;
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
@@ -54,7 +54,7 @@ impl Node for ClockNode {
         }
     }
 
-    fn properties(&self) -> &[PropertyEntry] {
+    fn properties(&self) -> &'static [PropertyEntry] {
         &PROPERTIES
     }
 }
@@ -110,7 +110,7 @@ impl AggregatePropertyValue for ClockValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         let address = const { RegisterIndex::from_name("TIME_YEAR").unwrap().address() };
         let values = vec![
             self.0.year() as u16,
@@ -129,7 +129,7 @@ impl AggregatePropertyValue for ClockValue {
                 yield Ok(EventResult::HomieSet {
                     node_id: node_id.clone(),
                     prop_idx,
-                    operation: operation.clone(),
+                    operation,
                     response: response.kind,
                 });
             }
@@ -173,7 +173,7 @@ impl ActionPropertyValue for SynchronizeClockValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         Box::pin(async_stream::stream! {
             let system_tz = jiff::tz::TimeZone::system();
             let address = const { RegisterIndex::from_name("TIME_YEAR").unwrap().address() };
@@ -240,7 +240,7 @@ impl AggregatePropertyValue for UptimeValue {
         _: HomieID,
         _: usize,
         _: Arc<Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         unreachable!("uptime is not settable");
     }
 }

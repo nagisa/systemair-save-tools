@@ -53,6 +53,7 @@ pub(crate) enum EventResult {
     },
 }
 
+#[derive(Debug)]
 enum PublishProperty {
     Always,
     OnChange,
@@ -150,7 +151,7 @@ pub struct Args {
     /// Note that registers for these properties are polled individually and therefore this option
     /// is meant to fine-tune a couple registers at most. If you would like more frequent status
     /// updates in general, consider adjusting `--poll-period` setting instead.
-    #[arg(long, value_delimiter = ',', default_value = "alarm/any=3s")]
+    #[arg(long, value_delimiter = ',', num_args = 0.., default_value = "alarm/any=3s")]
     poll: Vec<PollConfig>,
 
     /// Specify the nodes to enable.
@@ -164,9 +165,9 @@ pub struct Args {
     nodes: Vec<HomieID>,
 }
 
-type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
+type EventStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
 
-type ModbusReadStream = SelectAll<Pin<Box<ModbusStream>>>;
+type AllEventStreams = SelectAll<Pin<Box<EventStream>>>;
 
 pub(crate) struct SystemAirDevice {
     args: Args,
@@ -177,7 +178,7 @@ pub(crate) struct SystemAirDevice {
     nodes: BTreeMap<HomieID, Box<dyn Node>>,
     modbus: Arc<Connection>,
     modbus_values: ModbusDeviceValues,
-    event_stream: ModbusReadStream,
+    event_stream: AllEventStreams,
     commands: mpsc::UnboundedReceiver<Command>,
 }
 
@@ -236,7 +237,7 @@ impl SystemAirDevice {
             nodes,
             modbus,
             modbus_values: ModbusDeviceValues::new(),
-            event_stream: ModbusReadStream::new(),
+            event_stream: AllEventStreams::new(),
         })
     }
 
@@ -292,7 +293,8 @@ impl SystemAirDevice {
                         } else {
                             for property in node.properties() {
                                 for register in property.kind.registers() {
-                                    individual_polls.push((register.address(), *poll_config.duration));
+                                    individual_polls
+                                        .push((register.address(), *poll_config.duration));
                                 }
                             }
                         }
@@ -455,18 +457,24 @@ impl SystemAirDevice {
             'next_prop: for (prop_idx, property) in node.properties().iter().enumerate() {
                 for register in property.kind.registers() {
                     let address = register.address();
-                    if !changing_registers.is_set(address) {
-                        continue;
+                    let property_handling = property_handling(node_id, prop_idx);
+                    match property_handling {
+                        PublishProperty::OnChange => {
+                            if !changing_registers.is_set(address) {
+                                continue;
+                            }
+                            let prop_id = &property.prop_id;
+                            tracing::debug!(
+                                %node_id,
+                                %prop_id,
+                                address,
+                                "register change reloads node property"
+                            );
+                        }
+                        PublishProperty::Always => {}
                     }
-                    let prop_id = &property.prop_id;
-                    tracing::debug!(
-                        %node_id,
-                        %prop_id,
-                        address,
-                        "register change reloads node property"
-                    );
                     let old = property.kind.value_from_modbus(&self.modbus_values);
-                    property_values.push((node_id.clone(), prop_idx, old));
+                    property_values.push((node_id.clone(), prop_idx, property_handling, old));
                     continue 'next_prop;
                 }
             }
@@ -475,12 +483,12 @@ impl SystemAirDevice {
             let word = u16::from_be_bytes(*word);
             self.modbus_values.set_value(address, word);
         }
-        for (node_id, prop_idx, old) in property_values {
+        for (node_id, prop_idx, property_handling, old) in property_values {
             let node = self.nodes.get(&node_id);
             let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
             let prop = &node.properties()[prop_idx];
             let new = prop.kind.value_from_modbus(&self.modbus_values);
-            let (value_changed, target_changed, new) = match (old, new) {
+            let (mut value_changed, mut target_changed, new) = match (old, new) {
                 (None, None) => (false, false, None),
                 (Some(_), None) => panic!("erasing values is not inteded to be possible"),
                 (_, Some(Err(error))) => {
@@ -509,20 +517,24 @@ impl SystemAirDevice {
                     (value_changed, target_changed, Some(new))
                 }
             };
+            if let PublishProperty::Always = property_handling {
+                value_changed = true;
+                target_changed = true;
+            }
             if let Some(new) = new {
-                match property_handling(&node_id, prop_idx) {
-                    PublishProperty::Always => {
-                        self.handle_value_change(&node_id, prop_idx, &*new).await?;
-                        self.handle_target_change(&node_id, prop_idx, &*new).await?;
-                    }
-                    PublishProperty::OnChange => {
-                        if value_changed {
-                            self.handle_value_change(&node_id, prop_idx, &*new).await?;
-                        }
-                        if target_changed {
-                            self.handle_target_change(&node_id, prop_idx, &*new).await?;
-                        }
-                    }
+                if target_changed {
+                    self.handle_target_change(&node_id, prop_idx, &*new).await?;
+                }
+                if value_changed {
+                    self.handle_value_change(&node_id, prop_idx, &*new).await?;
+                }
+                if value_changed || target_changed {
+                    self.event_stream.push(prop.kind.on_property_change(
+                        node_id,
+                        prop_idx,
+                        Arc::clone(&self.modbus),
+                        new,
+                    ));
                 }
             }
         }

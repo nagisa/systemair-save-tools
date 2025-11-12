@@ -3,8 +3,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::connection::Connection;
+use crate::homie::EventStream;
 use crate::homie::node::PropertyEntry;
-use crate::homie::ModbusStream;
 use crate::registers::{DataType, Value};
 use homie5::device_description::{
     HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
@@ -35,6 +35,14 @@ pub(crate) trait PropertyValue: Any + Send + Sync {
     fn target(&self) -> Option<String> {
         None
     }
+    fn on_property_change(
+        &self,
+        _node_id: HomieID,
+        _prop_idx: usize,
+        _modbus: Arc<Connection>,
+    ) -> Pin<Box<EventStream>> {
+        Box::pin(futures::stream::empty())
+    }
 }
 
 pub(crate) type DynPropertyValue = dyn Send + Sync + PropertyValue;
@@ -53,7 +61,7 @@ pub(crate) trait ActionPropertyValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-    ) -> Pin<Box<ModbusStream>>;
+    ) -> Pin<Box<EventStream>>;
 }
 
 pub(crate) trait AggregatePropertyValue {
@@ -63,7 +71,7 @@ pub(crate) trait AggregatePropertyValue {
         node_id: HomieID,
         prop_idx: usize,
         modbus: Arc<Connection>,
-    ) -> Pin<Box<ModbusStream>>;
+    ) -> Pin<Box<EventStream>>;
 }
 
 pub(crate) trait PropertyDescription {
@@ -251,7 +259,7 @@ impl AggregatePropertyValue for RemainingTimeValue {
         _: HomieID,
         _: usize,
         _: Arc<Connection>,
-    ) -> std::pin::Pin<Box<super::ModbusStream>> {
+    ) -> std::pin::Pin<Box<super::EventStream>> {
         unreachable!("remaining time is computed and not settable");
     }
 }

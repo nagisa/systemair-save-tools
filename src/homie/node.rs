@@ -3,7 +3,7 @@ use crate::homie::value::{
     ActionPropertyValue, AggregatePropertyValue, DynPropertyValue, PropertyValue,
     RegisterPropertyValue,
 };
-use crate::homie::{EventResult, ModbusStream};
+use crate::homie::{EventResult, EventStream};
 use crate::modbus;
 use crate::modbus_device_cache::ModbusDeviceValues;
 use crate::registers::{RegisterIndex, Value};
@@ -19,7 +19,7 @@ pub trait Node {
     fn node_id(&self) -> HomieID;
     /// The Homie description for the node.
     fn description(&self) -> HomieNodeDescription;
-    fn properties(&self) -> &[PropertyEntry];
+    fn properties(&self) -> &'static [PropertyEntry];
 }
 
 pub(crate) trait PropertyKind: Send + Sync {
@@ -35,7 +35,18 @@ pub(crate) trait PropertyKind: Send + Sync {
         prop_idx: usize,
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
-    ) -> Pin<Box<ModbusStream>>;
+    ) -> Pin<Box<EventStream>>;
+    /// Additional handling for when properties change.
+    ///
+    /// This is largely meant to allow follow-up operations (mainly reads) when we notice that a
+    /// register has changed.
+    fn on_property_change(
+        &self,
+        _node_id: HomieID,
+        _prop_idx: usize,
+        _modbus: Arc<Connection>,
+        _value: Box<DynPropertyValue>,
+    ) -> Pin<Box<EventStream>>;
     fn adjust_description(&self, description: &mut HomiePropertyDescription);
 }
 
@@ -73,7 +84,7 @@ where
         prop_idx: usize,
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
-    ) -> Pin<Box<ModbusStream>> {
+    ) -> Pin<Box<EventStream>> {
         let address = self.register.address();
         let value = (value as Box<dyn std::any::Any>)
             .downcast::<T>()
@@ -99,6 +110,19 @@ where
                 response,
             })
         })) as _
+    }
+
+    fn on_property_change(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        value: Box<DynPropertyValue>,
+    ) -> Pin<Box<EventStream>> {
+        let value = (value as Box<dyn std::any::Any>)
+            .downcast::<T>()
+            .expect("type confusion");
+        value.on_property_change(node_id, prop_idx, modbus)
     }
 
     fn adjust_description(&self, description: &mut HomiePropertyDescription) {
@@ -175,7 +199,7 @@ where
         prop_idx: usize,
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
-    ) -> Pin<Box<ModbusStream>> {
+    ) -> Pin<Box<EventStream>> {
         if !T::SETTABLE {
             panic!("should never call homie_set_to_modbus for aggregates that aren't settable");
         }
@@ -183,6 +207,19 @@ where
             .downcast::<T>()
             .expect("type confusion");
         value.set(node_id, prop_idx, modbus)
+    }
+
+    fn on_property_change(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        value: Box<DynPropertyValue>,
+    ) -> Pin<Box<EventStream>> {
+        let value = (value as Box<dyn std::any::Any>)
+            .downcast::<T>()
+            .expect("type confusion");
+        value.on_property_change(node_id, prop_idx, modbus)
     }
 
     fn adjust_description(&self, description: &mut HomiePropertyDescription) {
@@ -222,11 +259,24 @@ where
         prop_idx: usize,
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
-    ) -> Pin<Box<ModbusStream>> {
+    ) -> Pin<Box<EventStream>> {
         let value = (value as Box<dyn std::any::Any>)
             .downcast::<T>()
             .expect("type confusion");
         value.invoke(node_id, prop_idx, modbus)
+    }
+
+    fn on_property_change(
+        &self,
+        node_id: HomieID,
+        prop_idx: usize,
+        modbus: Arc<Connection>,
+        value: Box<DynPropertyValue>,
+    ) -> Pin<Box<EventStream>> {
+        let value = (value as Box<dyn std::any::Any>)
+            .downcast::<T>()
+            .expect("type confusion");
+        value.on_property_change(node_id, prop_idx, modbus)
     }
 
     fn adjust_description(&self, description: &mut HomiePropertyDescription) {
