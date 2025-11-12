@@ -125,20 +125,17 @@ pub struct Connection {
     pub worker: tokio::task::JoinHandle<Result<(), Error>>,
     pub response_tracker: Arc<ResponseTracker>,
     transaction_id_generator: std::sync::atomic::AtomicU16,
-    device_id: u8,
-    server_busy_retry_delay: humantime::Duration,
+    args: Args,
 }
 
 impl Connection {
     pub async fn new(args: Args) -> Result<Connection, Error> {
         let (request_queue, jobs) = tokio::sync::mpsc::unbounded_channel();
         let response_tracker = Default::default();
-        let device_id = args.how.device_id;
-        let server_busy_retry_delay = args.server_busy_retry_delay;
         let worker = if args.how.tcp.is_some() {
             TcpWorker {
                 reconnect_countdown: args.reconnect_after_timeouts,
-                args,
+                args: args.clone(),
                 responses: Arc::clone(&response_tracker),
                 inflight: VecDeque::with_capacity(8),
             }
@@ -153,8 +150,7 @@ impl Connection {
             worker,
             response_tracker,
             transaction_id_generator: AtomicU16::new(0),
-            device_id,
-            server_busy_retry_delay,
+            args,
         })
     }
 
@@ -185,7 +181,7 @@ impl Connection {
     ) -> Result<Option<modbus::Response>, Error> {
         let transaction_id = self.new_transaction_id();
         let request = modbus::Request {
-            device_id: self.device_id,
+            device_id: self.args.how.device_id,
             transaction_id,
             operation,
         };
@@ -213,7 +209,7 @@ impl Connection {
     }
 
     pub async fn handle_server_busy(&self) {
-        tokio::time::sleep(self.server_busy_retry_delay.into()).await;
+        tokio::time::sleep(*self.args.server_busy_retry_delay).await;
     }
 }
 

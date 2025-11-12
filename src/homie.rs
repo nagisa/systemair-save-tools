@@ -84,6 +84,84 @@ pub enum Error {
     PublishTarget(#[source] rumqttc::v5::ClientError, HomieID, HomieID, String),
     #[error("could not publish {1}/{2} = {3}")]
     PublishValue(#[source] rumqttc::v5::ClientError, HomieID, HomieID, String),
+    #[error("requested node {0} is not known")]
+    UnknownRequestedNode(HomieID),
+    #[error("polling config value `{0}` has no equal sign (should follow `node/prop=duration`)")]
+    SplitPollConfigEqualSign(String),
+    #[error("polling config value `{0}` specifies an invalid duration")]
+    PollParseDuration(#[source] humantime::DurationError, String),
+    #[error("polling config value `{0}` specifies a malformed identifier")]
+    PollParseHomieId(#[source] homie5::InvalidHomieIDError, String),
+    #[error("polling config specifies a non-existent node `{0}`")]
+    PollUnknownNode(HomieID),
+    #[error("polling config specifies a non-existent node property `{0}/{1}`")]
+    PollUnknownProp(HomieID, HomieID),
+}
+
+#[derive(Clone)]
+struct PollConfig {
+    node_id: HomieID,
+    prop_id: Option<HomieID>,
+    duration: humantime::Duration,
+}
+
+impl std::str::FromStr for PollConfig {
+    type Err = Error;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let Some((nodeprop, duration)) = value.split_once("=") else {
+            return Err(Error::SplitPollConfigEqualSign(value.to_string()));
+        };
+        let duration = duration
+            .parse()
+            .map_err(|e| Error::PollParseDuration(e, value.to_string()))?;
+        let (node_id, prop_id) = match nodeprop.split_once("/") {
+            Some((node_id, prop_id)) => (node_id, Some(prop_id)),
+            None => (nodeprop, None),
+        };
+        let node_id = node_id
+            .parse()
+            .map_err(|e| Error::PollParseHomieId(e, value.to_string()))?;
+        let prop_id = prop_id
+            .map(|v| v.parse())
+            .transpose()
+            .map_err(|e| Error::PollParseHomieId(e, value.to_string()))?;
+        Ok(Self {
+            node_id,
+            prop_id,
+            duration,
+        })
+    }
+}
+
+#[derive(clap::Parser, Clone)]
+#[group(id = "homie::Args")]
+pub struct Args {
+    /// Operate in a read-only mode (do not subscribe to any mqtt topics.)
+    #[clap(long)]
+    read_only: bool,
+
+    /// Poll the properties that don't otherwise have any polling period configured every specified
+    /// interval.
+    #[clap(long, short = 'r', default_value = "30s")]
+    poll_period: humantime::Duration,
+
+    /// Configure polling for the provided nodes and properties on a case-by-case basis.
+    ///
+    /// Note that registers for these properties are polled individually and therefore this option
+    /// is meant to fine-tune a couple registers at most. If you would like more frequent status
+    /// updates in general, consider adjusting `--poll-period` setting instead.
+    #[arg(long, value_delimiter = ',', default_value = "alarm/any=3s")]
+    poll: Vec<PollConfig>,
+
+    /// Specify the nodes to enable.
+    ///
+    /// By default all nodes are enabled
+    #[clap(
+        long,
+        value_delimiter = ',',
+        default_value = "alarm,clock,compensation,cooler,demand-control,fan-speed,filter,free-cooling,heater,heat-exchanger,mode,temperature-controller"
+    )]
+    nodes: Vec<HomieID>,
 }
 
 type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connection::Error>>;
@@ -91,6 +169,7 @@ type ModbusStream = dyn Send + Sync + Stream<Item = Result<EventResult, connecti
 type ModbusReadStream = SelectAll<Pin<Box<ModbusStream>>>;
 
 pub(crate) struct SystemAirDevice {
+    args: Args,
     mqtt: rumqttc::v5::AsyncClient,
     protocol: Homie5DeviceProtocol,
     state: HomieDeviceStatus,
@@ -104,12 +183,13 @@ pub(crate) struct SystemAirDevice {
 
 impl SystemAirDevice {
     pub(crate) fn new(
+        args: Args,
         mqtt: rumqttc::v5::AsyncClient,
         protocol: Homie5DeviceProtocol,
         modbus: Arc<Connection>,
         commands: mpsc::UnboundedReceiver<Command>,
-    ) -> Self {
-        let nodes = [
+    ) -> Result<Self, Error> {
+        let known_nodes = [
             Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
             Box::new(clock_node::ClockNode::new()) as Box<dyn Node>,
             Box::new(compensation_node::CompensationNode::new()) as _,
@@ -123,14 +203,31 @@ impl SystemAirDevice {
             Box::new(mode_node::ModeNode::new()) as _,
             Box::new(temperature_controller_node::TemperatureControllerNode::new()) as _,
         ];
+        let nodes = known_nodes
+            .into_iter()
+            .map(|v| (v.node_id(), v))
+            .filter(|(i, _)| args.nodes.contains(i))
+            .collect::<BTreeMap<_, _>>();
         let mut description =
             homie5::device_description::DeviceDescriptionBuilder::new().name("SystemAIR SAVE");
-        for node in &nodes {
-            description = description.add_node(node.node_id(), node.description());
+        for requested in &args.nodes {
+            if let Some(node) = nodes.get(requested) {
+                description = description.add_node(node.node_id(), node.description());
+            } else {
+                return Err(Error::UnknownRequestedNode(requested.clone()));
+            }
         }
-        let description = description.build();
-        let nodes = nodes.into_iter().map(|v| (v.node_id(), v)).collect();
-        Self {
+        let mut description = description.build();
+        if args.read_only {
+            for (_, node) in &mut description.nodes {
+                for (_, prop) in &mut node.properties {
+                    prop.settable = false;
+                }
+            }
+        }
+
+        Ok(Self {
+            args,
             mqtt,
             state: HomieDeviceStatus::Init,
             protocol,
@@ -140,7 +237,7 @@ impl SystemAirDevice {
             modbus,
             modbus_values: ModbusDeviceValues::new(),
             event_stream: ModbusReadStream::new(),
-        }
+        })
     }
 
     pub async fn publish_device(&mut self) -> Result<(), Error> {
@@ -175,12 +272,41 @@ impl SystemAirDevice {
                             }
                         }
                     }
+
+                    let mut individual_polls = vec![];
+                    'poll: for poll_config in &self.args.poll {
+                        let Some(node) = self.nodes.get(&poll_config.node_id) else {
+                            return Err(Error::PollUnknownNode(poll_config.node_id.clone()));
+                        };
+                        if let Some(prop_id) = &poll_config.prop_id {
+                            for property in node.properties() {
+                                if &property.prop_id == prop_id {
+                                    for register in property.kind.registers() {
+                                        individual_polls
+                                            .push((register.address(), *poll_config.duration));
+                                    }
+                                    continue 'poll;
+                                }
+                            }
+                            return Err(Error::PollUnknownProp(node.node_id(), prop_id.clone()));
+                        } else {
+                            for property in node.properties() {
+                                for register in property.kind.registers() {
+                                    individual_polls.push((register.address(), *poll_config.duration));
+                                }
+                            }
+                        }
+                    }
+                    for (address, duration) in individual_polls {
+                        need_registers.clear(address);
+                        self.schedule_periodic_read(address, 1, duration);
+                    }
+
                     for range in need_registers.find_optimal_ranges(modbus::MAX_SAFE_READ_COUNT) {
                         self.schedule_periodic_read(
                             *range.start(),
                             u16::try_from(range.len()).unwrap(),
-                            // FIXME: determine read period from node information.
-                            Duration::from_secs(30),
+                            *self.args.poll_period,
                         );
                     }
                     while !self.modbus_values.has_all_values(&need_registers) {
@@ -194,6 +320,9 @@ impl SystemAirDevice {
                 homie5::DevicePublishStep::SubscribeProperties => {
                     // SUBTLE: rumqttc balks at empty list of subscriptions, but that can happen if
                     // we don't really have any settable properties...
+                    if self.args.read_only {
+                        continue;
+                    }
                     let mut p = self
                         .protocol
                         .subscribe_props(&self.description)

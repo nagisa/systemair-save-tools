@@ -23,6 +23,11 @@ impl RegisterBitmask {
         self.0[word] |= bitmask;
     }
 
+    pub fn clear(&mut self, address: u16) {
+        let (word, bitmask) = self.word_bit_mask(address);
+        self.0[word] &= !bitmask;
+    }
+
     // Returns `true` only if `superset` has all bits from `self` set.
     pub fn is_subset_of(&self, superset: &RegisterBitmask) -> bool {
         for (&our, &their) in self.0.iter().zip(superset.0.iter()) {

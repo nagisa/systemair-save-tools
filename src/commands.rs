@@ -496,6 +496,8 @@ pub mod mqtt {
     pub struct Args {
         #[clap(flatten)]
         connection: connection::Args,
+        #[clap(flatten)]
+        device_args: homie::Args,
 
         /// How to connect to the MQTT broker.
         ///
@@ -515,6 +517,7 @@ pub mod mqtt {
         #[clap(short = 'p', long, requires = "mqtt_user")]
         mqtt_password: Option<String>,
 
+        /// The name of this device as seen in the MQTT topic and homie description.
         #[clap(long, default_value = "systemair-save-tools")]
         device_name: String,
     }
@@ -531,6 +534,8 @@ pub mod mqtt {
         InvalidDeviceName(#[source] homie5::InvalidHomieIDError, String),
         #[error("MQTT broker address {1} is not valid")]
         InvalidBrokerAddress(#[source] rumqttc::v5::OptionError, String),
+        #[error("could not create the homie device")]
+        CreateDevice(#[source] crate::homie::Error),
     }
 
     #[tokio::main(flavor = "current_thread")]
@@ -563,7 +568,9 @@ pub mod mqtt {
         ));
         let (client, mut client_loop) = AsyncClient::new(mqtt_options, 100);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
-        let mut device = homie::SystemAirDevice::new(client, protocol, connection, command_rx);
+        let mut device =
+            homie::SystemAirDevice::new(args.device_args, client, protocol, connection, command_rx)
+                .map_err(Error::CreateDevice)?;
         {
             let mut publish_future = std::pin::pin!(device.publish_device());
             loop {
