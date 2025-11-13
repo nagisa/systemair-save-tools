@@ -7,10 +7,6 @@
 
 </div>
 
-> [!NOTE]
-> This project is work in progress although most of the interesting functionality is serviceable
-> for most of the use-cases!
-
 This package provides a collection of tools to operate [Systemair SAVE air heat recovery
 units][mfct]. The tools range from as simple as printing the documented and undocumented Modbus
 registers known to this tool, to reading and writing those registers, to exposing the control of
@@ -21,9 +17,12 @@ as OpenHAB, Home Assistant or NodeRED.
 
 [mfct]: https://www.systemair.com/en/products/residential-ventilation-systems/air-handling-units/save
 
-The tool collection is available as a standalone, dependency-free executable download for the three
-major platforms (Windows, MacOS, Linux.) Note, however, that this is a CLI tool and will require
-you to use a terminal to use it.
+The tool collection is available as a [standalone, dependency-free executable download][latest] for
+the three major platforms (Windows, MacOS, Linux.) Note, however, that this is a CLI tool meant to
+run either as a daemon service (bring your own service manager) or interactively invoked from a
+terminal or other programs.
+
+[latest]: https://github.com/nagisa/systemair-save-tools/releases/latest
 
 Currently communication over TCP via the SystemAIR IAM module or another Modbus gateway is
 supported.

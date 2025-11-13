@@ -1,5 +1,10 @@
 # Release Process
 
+> [!NOTE]
+> This is an AI hallucination! As are the release workflows. Between relying on AI and writing yaml
+> I'll take the less terrible every day :) The author has carefully reviewed the outputs and it
+> seemed fine (though it didn't actually work in the end without further fixes.)
+
 This repository uses GitHub Actions to automatically build and publish releases for multiple platforms.
 
 ## Creating a Release
