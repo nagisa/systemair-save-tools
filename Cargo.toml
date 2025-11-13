@@ -1,9 +1,11 @@
 [package]
 name = "systemair-save-tools"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+license = "MIT"
+authors = ["Simonas Kazlauskas <systemair@kazlauskas.me>"]
+repository = "https://github.com/nagisa/systemair-save-tools/"
+readme = "README.mkd"
 
 [dependencies]
 clap = { version = "4.5.21", features = ["cargo", "derive", "error-context"] }
