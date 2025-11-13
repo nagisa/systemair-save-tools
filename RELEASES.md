@@ -23,7 +23,7 @@ The GitHub Actions workflows will automatically:
 - Detect the version change in `Cargo.toml`
 - Create a git tag (e.g., `v1.0.0`) if it doesn't already exist
 - Trigger the release workflow
-- Build binaries for all supported platforms (Linux, Windows, macOS Intel, macOS ARM)
+- Build binaries for all supported platforms (Linux, Windows, macOS ARM)
 - Create a new GitHub release with the tag
 - Attach all binaries to the release
 - Generate release notes from commits
@@ -44,7 +44,6 @@ The release workflow builds binaries for:
 
 - **Linux x86_64**: Statically linked using musl for maximum compatibility
 - **Windows x86_64**: Built with MSVC and static CRT
-- **macOS x86_64**: Built for Intel-based Macs
 - **macOS ARM64**: Built for Apple Silicon Macs
 
 ## Binary Naming
@@ -52,7 +51,6 @@ The release workflow builds binaries for:
 Released binaries follow this naming convention:
 - `systemair-save-tools-linux-x86_64` - Linux binary
 - `systemair-save-tools-windows-x86_64.exe` - Windows binary
-- `systemair-save-tools-macos-x86_64` - macOS Intel binary
 - `systemair-save-tools-macos-arm64` - macOS ARM64 binary
 
 ## Manual Workflow Trigger
