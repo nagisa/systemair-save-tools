@@ -28,8 +28,8 @@
         };
     in (flake-utils.lib.eachDefaultSystem (system: flakeForSystem system)) // rec {
         overlay = final: prev: { systemair-save-tools = package final; };
-        nixosModules.default = { config, lib, pkgs, ... }: let
-            cfg = config.services.systemair-save-tools;
+        nixosModules.default = { config, lib, pkgs, utils, ... }: let
+            cfg = config.services.systemair2mqtt;
         in with lib; {
             options.services.systemair2mqtt = {
                 enable = mkEnableOption "Enable the systemair2mqtt service";

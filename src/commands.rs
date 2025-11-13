@@ -518,7 +518,7 @@ pub mod mqtt {
         mqtt_password: Option<String>,
 
         /// The name of this device as seen in the MQTT topic and homie description.
-        #[clap(long, default_value = "systemair-save-tools")]
+        #[clap(long, default_value = "systemair")]
         device_name: String,
     }
 
