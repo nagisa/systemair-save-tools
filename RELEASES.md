@@ -4,20 +4,39 @@ This repository uses GitHub Actions to automatically build and publish releases 
 
 ## Creating a Release
 
-To create a new release:
+To create a new release, simply bump the version in `Cargo.toml` and push to the main branch:
 
-1. Ensure all changes are committed and pushed to the main branch
-2. Create and push a version tag:
-   ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
+1. Update the version in `Cargo.toml`:
+   ```toml
+   [package]
+   version = "1.0.0"  # Update this line
    ```
 
-The GitHub Actions workflow will automatically:
+2. Commit and push to main:
+   ```bash
+   git add Cargo.toml
+   git commit -m "Bump version to 1.0.0"
+   git push origin main
+   ```
+
+The GitHub Actions workflows will automatically:
+- Detect the version change in `Cargo.toml`
+- Create a git tag (e.g., `v1.0.0`) if it doesn't already exist
+- Trigger the release workflow
 - Build binaries for all supported platforms (Linux, Windows, macOS Intel, macOS ARM)
 - Create a new GitHub release with the tag
 - Attach all binaries to the release
 - Generate release notes from commits
+
+### Manual Tag Creation (Alternative)
+
+You can also manually create and push a version tag:
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This will skip the auto-tagging workflow and directly trigger the release build.
 
 ## Supported Platforms
 
