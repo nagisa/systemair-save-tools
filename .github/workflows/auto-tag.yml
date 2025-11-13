@@ -9,14 +9,14 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   tag-version:
     name: Create Tag from Cargo.toml Version
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -39,17 +39,16 @@ jobs:
             echo "Tag ${{ steps.get_version.outputs.tag }} does not exist"
           fi
 
-      - name: Create and push tag
-        if: steps.check_tag.outputs.exists == 'false'
+      - if: steps.check_tag.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${{ steps.get_version.outputs.tag }}" -m "Release ${{ steps.get_version.outputs.version }}"
           git push origin "${{ steps.get_version.outputs.tag }}"
+          gh workflow run release.yml --ref "${{ steps.get_version.outputs.tag }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tag already exists
-        if: steps.check_tag.outputs.exists == 'true'
+      - if: steps.check_tag.outputs.exists == 'true'
         run: |
           echo "::notice::Tag ${{ steps.get_version.outputs.tag }} already exists. Skipping tag creation."
