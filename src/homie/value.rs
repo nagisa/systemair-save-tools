@@ -301,7 +301,7 @@ macro_rules! string_enum {
         $($crate::homie::value::string_enum!(@impl $impl for $name);)*
     };
     (@impl TryFromValue for $name:ident) => {
-        impl TryFrom<Value> for $name {
+        impl TryFrom<$crate::registers::Value> for $name {
             type Error = ();
             fn try_from(value: crate::registers::Value) -> Result<Self, Self::Error> {
                 Self::from_repr(value.into_inner()).ok_or(())

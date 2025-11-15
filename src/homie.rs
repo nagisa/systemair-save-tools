@@ -9,6 +9,7 @@ mod free_cooling_node;
 mod heat_exchanger_node;
 mod heater_node;
 mod mode_node;
+mod input_node;
 mod node;
 mod temperature_controller_node;
 mod value;
@@ -160,7 +161,7 @@ pub struct Args {
     #[clap(
         long,
         value_delimiter = ',',
-        default_value = "alarm,clock,compensation,cooler,demand-control,fan-speed,filter,free-cooling,heater,heat-exchanger,mode,temperature-controller"
+        default_value = "alarm,clock,compensation,cooler,demand-control,fan-speed,filter,free-cooling,heater,heat-exchanger,mode,temperature-controller,inputs"
     )]
     nodes: Vec<HomieID>,
 }
@@ -203,6 +204,7 @@ impl SystemAirDevice {
             Box::new(heat_exchanger_node::HeatExchangerNode::new()) as _,
             Box::new(mode_node::ModeNode::new()) as _,
             Box::new(temperature_controller_node::TemperatureControllerNode::new()) as _,
+            Box::new(input_node::InputNode::new()) as _,
         ];
         let nodes = known_nodes
             .into_iter()

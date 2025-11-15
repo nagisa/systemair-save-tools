@@ -55,8 +55,7 @@ super::node::properties! { static PROPERTIES = [
      { "relative-humidity": AlarmValue = aggregate "ALARM_RH_ALARM" },
      { "co2": AlarmValue = aggregate "ALARM_CO2_ALARM" },
      { "low-supply-air-temperature": AlarmValue = aggregate "ALARM_LOW_SAT_ALARM" },
-     // TODO: de-TLA this name: probably has something to do with bypass damper.
-     { "byf": AlarmValue = aggregate "ALARM_BYF_ALARM" },
+     { "bypass-damper-feedback": AlarmValue = aggregate "ALARM_BYF_ALARM" },
      { "manual-override-outputs": AlarmValue = aggregate "ALARM_MANUAL_OVERRIDE_OUTPUTS_ALARM" },
      { "pdm-room-humidity-sensor": AlarmValue = aggregate "ALARM_PDM_RHS_ALARM" }, // PDM = pulse density modulation
      { "pdm-extract-room-temperature": AlarmValue = aggregate "ALARM_PDM_EAT_ALARM" },
