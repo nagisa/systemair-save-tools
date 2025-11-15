@@ -6,11 +6,12 @@ use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
     { "active": BooleanValue = register "FUNCTION_ACTIVE_HEAT_RECOVERY" },
-    // FIXME: is this the universal register for this? 2143..2145 seem like they would likely be
-    // the {SP, FEEDBACK, OUTPUT}, basically the computed thing...
+    // NOTE: although this is a generic output register, the modbus register documentation
+    // specifies that this is specifically a heat exchanger AO value.
     { "current-speed": UintValue = register "OUTPUT_Y2_ANALOG" },
     { "defrosting-active": BooleanValue = register "FUNCTION_ACTIVE_DEFROSTING" },
     { "enable-cooling-recovery": BooleanValue = register "HEAT_EXCHANGER_COOLING_RECOVERY_ON_OFF" },
+    { "cooling-recovery-limit": CelsiusValue = register "COOLER_RECOVERY_LIMIT_T" },
     { "cooling-recovery-active": BooleanValue = register "FUNCTION_ACTIVE_COOLING_RECOVERY" },
     { "enable-humidity-transfer": BooleanValue = register "ROTOR_RH_TRANSFER_CTRL_ON_OFF" },
     { "humidity-transfer-active": BooleanValue = register "FUNCTION_ACTIVE_MOISTURE_TRANSFER" },

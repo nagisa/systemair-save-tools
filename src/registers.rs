@@ -577,17 +577,17 @@ macro_rules! for_each_register {
             11402: U16, RW, "DI_CONNECTION_2", min = 0, max = 18;
             11421: U16, RW, "DI_CFG_POLARITY_1", min = 0, max = 1;
             11422: U16, RW, "DI_CFG_POLARITY_2", min = 0, max = 1;
-            12011: U16, RW, "INPUT_ANALOG_UI_1";
-            12012: U16, RW, "INPUT_ANALOG_UI_2";
-            12013: U16, RW, "INPUT_ANALOG_UI_3";
-            12014: U16, RW, "INPUT_ANALOG_UI_4";
-            12015: U16, RW, "INPUT_ANALOG_UI_5";
+            12011: U16, R_, "INPUT_ANALOG_UI_1";
+            12012: U16, R_, "INPUT_ANALOG_UI_2";
+            12013: U16, R_, "INPUT_ANALOG_UI_3";
+            12014: U16, R_, "INPUT_ANALOG_UI_4";
+            12015: U16, R_, "INPUT_ANALOG_UI_5";
             12016: U16, R_, "INPUT_ANALOG_UI_6";
-            12021: U16, RW, "INPUT_DIGITAL_UI_1", min = 0, max = 1;
-            12022: U16, RW, "INPUT_DIGITAL_UI_2", min = 0, max = 1;
-            12023: U16, RW, "INPUT_DIGITAL_UI_3", min = 0, max = 1;
-            12024: U16, RW, "INPUT_DIGITAL_UI_4", min = 0, max = 1;
-            12025: U16, RW, "INPUT_DIGITAL_UI_5", min = 0, max = 1;
+            12021: U16, R_, "INPUT_DIGITAL_UI_1", min = 0, max = 1;
+            12022: U16, R_, "INPUT_DIGITAL_UI_2", min = 0, max = 1;
+            12023: U16, R_, "INPUT_DIGITAL_UI_3", min = 0, max = 1;
+            12024: U16, R_, "INPUT_DIGITAL_UI_4", min = 0, max = 1;
+            12025: U16, R_, "INPUT_DIGITAL_UI_5", min = 0, max = 1;
             12026: U16, R_, "INPUT_DIGITAL_UI_6";
             12031: U16, R_, "INPUT_DIGITAL_DI_1", min = 0, max = 1;
             12032: U16, R_, "INPUT_DIGITAL_DI_2", min = 0, max = 1;
@@ -1362,13 +1362,13 @@ pub static DESCRIPTIONS: &[&str] = &const {
             9002 => "Units for VAV control mode. 0=Pa, 1=InH2O",
             9003 => "Units for temperature. 0=Celsius, 1=Fahrenheit",
             11401 | 11402 => {
-                "Indicates what kind of DI functionality is connected to DI1. 0=None, 1=Away, \
-                 2=BYP, 3=Vacuum Cleaner, 4=Cooker Hood, 5=Crowded, 6=EMT, 7=External Stop, \
-                 8=Extra Controller Alarm, 9=Fireplace, 10=Holiday, 11=Refresh, 12=RGS, 13=Change \
-                 Over Feedback, 14=Fire Alarm, 15=Configurable DI1, 16=Configurable DI2, \
-                 17=Configurable DI3, 18=Pressure Guard"
+                "Indicates what kind of functionality is connected to the digital input. \
+                 0=None, 1=Away, 2=BYP, 3=Vacuum Cleaner, 4=Cooker Hood, 5=Crowded, 6=EMT, \
+                 7=External Stop, 8=Extra Controller Alarm, 9=Fireplace, 10=Holiday, 11=Refresh, \
+                 12=RGS, 13=Change Over Feedback, 14=Fire Alarm, 15=Configurable DI1, \
+                 16=Configurable DI2, 17=Configurable DI3, 18=Pressure Guard"
             }
-            11421 | 11422 => "Polarity of DI1. 0=NO, 1=NC",
+            11421 | 11422 => "Polarity of the digial input. 0=NO, 1=NC",
             12011 | 12012 | 12013 | 12014 | 12015 | 12016 => "mV",
             12021 => "State of UI1",
             12022 => "State of UI2",

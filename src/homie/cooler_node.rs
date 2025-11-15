@@ -7,8 +7,10 @@ use std::collections::BTreeMap;
 super::node::properties! { static PROPERTIES = [
     { "active": BooleanValue = register "FUNCTION_ACTIVE_COOLING" },
     { "demand": UintValue = register "COOLER_FROM_SATC" },
+    // NOTE: although this is a generic output register, the modbus register documentation
+    // specifies that this is specifically a cooler AO value.
+    { "current-speed": UintValue = register "OUTPUT_Y3_ANALOG" },
     { "circulation-pump-start-temperature": CelsiusValue = register "COOLER_CIRC_PUMP_START_T" },
-    { "recovery-limit": CelsiusValue = register "COOLER_RECOVERY_LIMIT_T" },
     { "outdoor-air-temperature-interlock": CelsiusValue = register "COOLER_OAT_INTERLOCK_T" },
     { "circulation-pump-stop-delay": StopDelay = register "COOLER_CIRC_PUMP_STOP_DELAY" },
 ] }
