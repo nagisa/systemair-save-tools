@@ -39,7 +39,10 @@ impl RegisterBitmask {
     }
 
     /// Finds an optimal list of ranges of set bits using dynamic programming.
-    pub(crate) fn find_optimal_ranges(&self, max_range_len: u16) -> Vec<std::ops::RangeInclusive<u16>> {
+    pub(crate) fn find_optimal_ranges(
+        &self,
+        max_range_len: u16,
+    ) -> Vec<std::ops::RangeInclusive<u16>> {
         let set_bits: Vec<u16> = SetBitsIterator::new(self).collect();
         let n = set_bits.len();
         if n == 0 {
