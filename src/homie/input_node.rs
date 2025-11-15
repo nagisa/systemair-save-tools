@@ -72,6 +72,6 @@ string_enum! {
     #[repr(u16)]
     enum DigitalInputPolarity {
         NormallyOpen = 0,
-        MormallyClosed = 1,
+        NormallyClosed = 1,
     }
 }
