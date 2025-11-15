@@ -29,3 +29,9 @@ num-derive = "0.4.2"
 num-traits = "0.2.19"
 jiff = "0.2.16"
 async-stream = "0.3.6"
+
+[lints.clippy]
+style = { level = "allow" }
+correctness = { level = "deny" }
+suspicious = { level = "deny" }
+perf = { level = "deny" }

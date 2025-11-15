@@ -22,7 +22,7 @@ impl Request {
             Operation::GetHoldings { address: _, count } => u32::from(*count) * 2,
             Operation::SetHoldings { address: _, values } => values.len() as u32 * 2,
         };
-        let rtu_blocks = (bytes_total + 0xFE) / 0xFF;
+        let rtu_blocks = bytes_total.div_ceil(0xFF);
         // 1 byte no padding, 2 bytes crc, 2 bytes address and function.
         let rtu_bytes = rtu_blocks * 5 + bytes_total;
         u16::try_from(rtu_bytes).unwrap_or(u16::MAX)

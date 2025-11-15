@@ -165,10 +165,12 @@ where
     }
 }
 
+type AggregateFromModbus = fn(&ModbusDeviceValues) -> Option<Result<Box<DynPropertyValue>, ()>>;
+
 pub(crate) struct AggregatePropertyKind<T> {
     pub registers: &'static [RegisterIndex],
     // Macro-generated constructor that delegates to `::new()`.
-    pub from_modbus: fn(&ModbusDeviceValues) -> Option<Result<Box<DynPropertyValue>, ()>>,
+    pub from_modbus: AggregateFromModbus,
     pub _phantom: std::marker::PhantomData<T>,
 }
 
@@ -293,7 +295,7 @@ pub(crate) struct PropertyEntry {
 
 impl PropertyEntry {
     pub fn description(&self) -> HomiePropertyDescription {
-        let mut initial = (self.mk_description)(&self);
+        let mut initial = (self.mk_description)(self);
         self.kind.adjust_description(&mut initial);
         initial
     }

@@ -1,8 +1,7 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{string_enum, BooleanValue, UintValue};
-use crate::registers::Value;
-use homie5::device_description::HomieNodeDescription;
+use crate::homie::value::{BooleanValue, UintValue, string_enum};
 use homie5::HomieID;
+use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
@@ -149,7 +148,7 @@ string_enum! {
     #[derive(Clone, Copy)]
     enum RegulationType {
         Manual = 0,
-        RPM = 1,
+        Rpm = 1,
         ConstantPressure = 2,
         ConstantFlow = 3,
         External = 4,

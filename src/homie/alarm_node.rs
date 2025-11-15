@@ -5,13 +5,10 @@
 //!
 //! * Whether the alarm is firing or not
 //! * Whether the alarm is "pending" for the other state (in case of a firing alarm, clearing it
-//! does not immediately make it go away -- instead it goes into the state "firing but cleared".)
+//!   does not immediately make it go away -- instead it goes into the state "firing but cleared".)
 //!
 //! This maps okay to the `$target` mechanism exposed in Homie and so most of the alarms have an
-//! `$target` property associated with them. For consistency the summary alarms use the same
-//! mechanism, even though they cannot be set and will never have a target that isn't equal to the
-//! value.
-//!
+//! `$target` property associated with them.
 
 // TODO: alarm log?
 
@@ -212,7 +209,7 @@ impl PropertyValue for AlarmOutputValue {
         // would be to have a really rare global poll rate and a frequent rate for just
         // `alarm/any`.
         if PROPERTIES[prop_idx].prop_id.as_str() == "any" {
-            return Box::pin(async_stream::stream! {
+            Box::pin(async_stream::stream! {
                 let register = const {RegisterIndex::from_name("ALARM_SAF_CTRL_ALARM").unwrap()};
                 let address = register.address();
                 let operation = modbus::Operation::GetHoldings { address, count: 119 };
@@ -228,9 +225,9 @@ impl PropertyValue for AlarmOutputValue {
                 let operation = modbus::Operation::GetHoldings { address, count: 42 };
                 let response = modbus.send_retrying(operation.clone()).await?.kind;
                 yield Ok(EventResult::Periodic { operation, response });
-            });
+            })
         } else {
-            return Box::pin(futures::stream::empty());
+            Box::pin(futures::stream::empty())
         }
     }
 }

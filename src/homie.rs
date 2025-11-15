@@ -8,8 +8,8 @@ mod filter_node;
 mod free_cooling_node;
 mod heat_exchanger_node;
 mod heater_node;
-mod mode_node;
 mod input_node;
+mod mode_node;
 mod node;
 mod temperature_controller_node;
 mod value;
@@ -184,6 +184,7 @@ pub(crate) struct SystemAirDevice {
 }
 
 impl SystemAirDevice {
+    #[expect(clippy::result_large_err)]
     pub(crate) fn new(
         args: Args,
         mqtt: rumqttc::v5::AsyncClient,
@@ -222,8 +223,8 @@ impl SystemAirDevice {
         }
         let mut description = description.build();
         if args.read_only {
-            for (_, node) in &mut description.nodes {
-                for (_, prop) in &mut node.properties {
+            for node in &mut description.nodes.values_mut() {
+                for prop in &mut node.properties.values_mut() {
                     prop.settable = false;
                 }
             }
@@ -268,7 +269,7 @@ impl SystemAirDevice {
                     tracing::info!("waiting for device read out…");
                     let mut need_registers = RegisterBitmask::new();
                     self.event_stream.clear();
-                    for (_, node) in &self.nodes {
+                    for node in self.nodes.values() {
                         for property in node.properties() {
                             for register in property.kind.registers() {
                                 need_registers.set(register.address());
@@ -412,7 +413,7 @@ impl SystemAirDevice {
         let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
         let prop = &node.properties()[prop_idx];
         let prop_id = &prop.prop_id;
-        let Some(pd) = self.description.get_property_by_id(node_id, &prop_id) else {
+        let Some(pd) = self.description.get_property_by_id(node_id, prop_id) else {
             tracing::warn!(
                 ?node_id,
                 ?prop_id,
@@ -425,7 +426,7 @@ impl SystemAirDevice {
         };
         let msg = self
             .protocol
-            .publish_target(&node_id, &prop_id, &tgt, pd.retained);
+            .publish_target(node_id, prop_id, &tgt, pd.retained);
         self.mqtt
             .homie_publish(msg)
             .await
@@ -738,6 +739,7 @@ pub(crate) enum Command {
 }
 
 impl Command {
+    #[expect(clippy::result_large_err)]
     pub(crate) fn try_from_mqtt_command(
         msg: rumqttc::v5::mqttbytes::v5::Publish,
     ) -> Result<Self, rumqttc::v5::mqttbytes::v5::Publish> {
@@ -749,7 +751,7 @@ impl Command {
                 property,
                 set_value,
             }) => Ok(Self::Set {
-                property: property,
+                property,
                 value: set_value,
             }),
             _ => Err(msg),

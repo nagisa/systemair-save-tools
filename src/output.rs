@@ -40,6 +40,7 @@ impl Args {
                 std::fs::OpenOptions::new()
                     .write(true)
                     .create(true)
+                    .truncate(true)
                     .open(path)
                     .map_err(|e| Error::OpenOutputFile(e, path.clone()))?,
             ) as Box<_>,
@@ -97,7 +98,7 @@ impl Output {
         &mut self,
         values: &[V],
     ) -> Result<(), Error> {
-        let max_len = 2 + 2 * values.into_iter().map(|v| v.len()).max().unwrap_or(0);
+        let max_len = 2 + 2 * values.iter().map(|v| v.len()).max().unwrap_or(0);
         let mut output = vec![0; max_len];
         let mut writer = csv_core::Writer::new();
         for value in values {
@@ -107,20 +108,20 @@ impl Output {
             };
             assert_eq!(value.len(), ib);
             self.io
-                .write_all(&mut output[..ob])
+                .write_all(&output[..ob])
                 .map_err(|e| self.write_error(e))?;
             let (WriteResult::InputEmpty, ob) = writer.delimiter(&mut output) else {
                 panic!("something wrong with csv output");
             };
             self.io
-                .write_all(&mut output[..ob])
+                .write_all(&output[..ob])
                 .map_err(|e| self.write_error(e))?;
         }
         let (WriteResult::InputEmpty, ob) = writer.terminator(&mut output) else {
             panic!("something wrong with csv output");
         };
         self.io
-            .write_all(&mut output[..ob])
+            .write_all(&output[..ob])
             .map_err(|e| self.write_error(e))
     }
 
@@ -141,7 +142,7 @@ impl Output {
             Formatter::Jsonl => {
                 serde_json::to_writer(&mut self.io, &serde_record())
                     .map_err(Error::SerializeJson)?;
-                write!(self.io, "\n").map_err(|e| self.write_error(e))?
+                writeln!(self.io).map_err(|e| self.write_error(e))?
             }
         }
         Ok(())

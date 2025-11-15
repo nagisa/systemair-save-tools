@@ -83,7 +83,7 @@ impl AggregatePropertyValue for TimeValue {
                 yield Ok(EventResult::HomieSet {
                     node_id: node_id.clone(),
                     prop_idx,
-                    operation: operation,
+                    operation,
                     response: response.kind,
                 });
             }

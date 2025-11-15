@@ -189,7 +189,7 @@ impl PropertyValue for SpcHumidityValue {
 }
 impl RegisterPropertyValue for SpcHumidityValue {
     fn to_modbus(&self) -> u16 {
-        self.0 as u16
+        self.0
     }
 }
 impl PropertyDescription for SpcHumidityValue {
@@ -221,7 +221,7 @@ impl TryFrom<&str> for StopDelay {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let span = value.parse::<jiff::Span>()?;
         let minutes = span.total(jiff::Unit::Minute)?;
-        if minutes < 0.0 || minutes > 20.0 {
+        if !(0.0..=20.0).contains(&minutes) {
             return Err(jiff::Error::from_args(format_args!(
                 "pump stop delay out of range"
             )));

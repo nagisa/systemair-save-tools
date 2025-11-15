@@ -1,9 +1,9 @@
+use crate::homie::EventResult;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
     ActionPropertyValue, BooleanValue, PropertyDescription, PropertyValue, RegisterPropertyValue,
     RemainingTimeValue,
 };
-use crate::homie::EventResult;
 use crate::modbus;
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
@@ -65,7 +65,7 @@ impl PropertyDescription for ReplacementPeriod {
 }
 impl RegisterPropertyValue for ReplacementPeriod {
     fn to_modbus(&self) -> u16 {
-        self.months as u16
+        self.months
     }
 }
 impl TryFrom<&str> for ReplacementPeriod {
@@ -73,7 +73,7 @@ impl TryFrom<&str> for ReplacementPeriod {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let duration = value.parse::<jiff::Span>()?;
         let months = duration.total(jiff::Unit::Month)?;
-        if months < 3.0 || months > 15.0 {
+        if !(3.0..=15.0).contains(&months) {
             return Err(jiff::Error::from_args(format_args!(
                 "filter replacement period out of range"
             )));

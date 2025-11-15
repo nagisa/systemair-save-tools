@@ -1,9 +1,9 @@
 use crate::registers::{RegisterIndex, Value};
 
-pub struct RegisterBitmask([u64; u16::MAX as usize / u64::BITS as usize]);
+pub(crate) struct RegisterBitmask([u64; u16::MAX as usize / u64::BITS as usize]);
 
 impl RegisterBitmask {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self([0; _])
     }
 
@@ -13,33 +13,33 @@ impl RegisterBitmask {
         (word, bit_mask)
     }
 
-    pub fn is_set(&self, address: u16) -> bool {
+    pub(crate) fn is_set(&self, address: u16) -> bool {
         let (word, bitmask) = self.word_bit_mask(address);
         (self.0[word] & bitmask) != 0
     }
 
-    pub fn set(&mut self, address: u16) {
+    pub(crate) fn set(&mut self, address: u16) {
         let (word, bitmask) = self.word_bit_mask(address);
         self.0[word] |= bitmask;
     }
 
-    pub fn clear(&mut self, address: u16) {
+    pub(crate) fn clear(&mut self, address: u16) {
         let (word, bitmask) = self.word_bit_mask(address);
         self.0[word] &= !bitmask;
     }
 
     // Returns `true` only if `superset` has all bits from `self` set.
-    pub fn is_subset_of(&self, superset: &RegisterBitmask) -> bool {
+    pub(crate) fn is_subset_of(&self, superset: &RegisterBitmask) -> bool {
         for (&our, &their) in self.0.iter().zip(superset.0.iter()) {
             if (their & our) != our {
                 return false;
             }
         }
-        return true;
+        true
     }
 
     /// Finds an optimal list of ranges of set bits using dynamic programming.
-    pub fn find_optimal_ranges(&self, max_range_len: u16) -> Vec<std::ops::RangeInclusive<u16>> {
+    pub(crate) fn find_optimal_ranges(&self, max_range_len: u16) -> Vec<std::ops::RangeInclusive<u16>> {
         let set_bits: Vec<u16> = SetBitsIterator::new(self).collect();
         let n = set_bits.len();
         if n == 0 {
@@ -87,14 +87,14 @@ impl RegisterBitmask {
     }
 }
 
-pub struct SetBitsIterator<'a> {
+pub(crate) struct SetBitsIterator<'a> {
     bitmask: &'a RegisterBitmask,
     word_index: u16,
     current_word_val: u64,
 }
 
 impl<'a> SetBitsIterator<'a> {
-    pub fn new(bitmask: &'a RegisterBitmask) -> Self {
+    pub(crate) fn new(bitmask: &'a RegisterBitmask) -> Self {
         SetBitsIterator {
             bitmask,
             word_index: 0,
@@ -122,29 +122,29 @@ impl<'a> Iterator for SetBitsIterator<'a> {
     }
 }
 
-pub struct ModbusDeviceValues {
+pub(crate) struct ModbusDeviceValues {
     values: [u16; u16::MAX as usize],
     have_value: RegisterBitmask,
 }
 
 impl ModbusDeviceValues {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             values: [0; _],
             have_value: RegisterBitmask::new(),
         }
     }
 
-    pub fn contains(&self, address: u16) -> bool {
+    pub(crate) fn contains(&self, address: u16) -> bool {
         self.have_value.is_set(address)
     }
 
-    pub fn value_of(&self, register: RegisterIndex) -> Option<Value> {
+    pub(crate) fn value_of(&self, register: RegisterIndex) -> Option<Value> {
         let word = self.value_of_address(register.address())?;
         Some(register.data_type().from_word(word))
     }
 
-    pub fn value_of_address(&self, address: u16) -> Option<u16> {
+    pub(crate) fn value_of_address(&self, address: u16) -> Option<u16> {
         if !self.contains(address) {
             return None;
         }
@@ -154,7 +154,7 @@ impl ModbusDeviceValues {
     /// Set the newly read modbus value with our cache view of the device.
     ///
     /// Returns `true` if the value has changed.
-    pub fn set_value(&mut self, address: u16, value: u16) -> bool {
+    pub(crate) fn set_value(&mut self, address: u16, value: u16) -> bool {
         let index = usize::from(address);
         let changed = value != self.values[index] || !self.have_value.is_set(address);
         self.values[index] = value;
@@ -162,7 +162,7 @@ impl ModbusDeviceValues {
         changed
     }
 
-    pub fn has_all_values(&self, address_mask: &RegisterBitmask) -> bool {
+    pub(crate) fn has_all_values(&self, address_mask: &RegisterBitmask) -> bool {
         address_mask.is_subset_of(&self.have_value)
     }
 }

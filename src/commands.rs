@@ -73,16 +73,9 @@ pub mod registers {
 
         pub fn is_match(&self, pattern: &str) -> bool {
             let pattern = pattern.to_uppercase();
-            if self.name.contains(&pattern) {
-                return true;
-            }
-            if self.description.to_uppercase().contains(&pattern) {
-                return true;
-            }
-            if self.address.to_string().contains(&pattern) {
-                return true;
-            }
-            return false;
+            self.name.contains(&pattern)
+                || self.description.to_uppercase().contains(&pattern)
+                || self.address.to_string().contains(&pattern)
         }
     }
 
@@ -102,7 +95,7 @@ pub mod registers {
             .map_err(Error::WriteOutput)?;
         for register in RegisterSchema::all_registers() {
             if let Some(pattern) = &args.filter {
-                if !register.is_match(&pattern) {
+                if !register.is_match(pattern) {
                     continue;
                 }
             }
@@ -293,7 +286,7 @@ pub mod read {
                         .send_retrying(read_request.to_operation())
                         .await
                         .map_err(Error::Communicate)?;
-                    return Ok::<_, Error>((read_request, outcome));
+                    Ok::<_, Error>((read_request, outcome))
                 })
             })
             .try_buffered(2);
@@ -539,6 +532,7 @@ pub mod mqtt {
     }
 
     #[tokio::main(flavor = "current_thread")]
+    #[expect(clippy::result_large_err)]
     pub async fn run(args: Args) -> Result<(), Error> {
         let mut mqtt_options = MqttOptions::parse_url(&args.mqtt_broker)
             .map_err(|e| Error::InvalidBrokerAddress(e, args.mqtt_broker))?;
