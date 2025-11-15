@@ -1,6 +1,5 @@
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{CelsiusValue, string_enum};
-use crate::registers::Value;
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;

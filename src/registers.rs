@@ -131,9 +131,9 @@ impl Value {
     }
 }
 
-impl Into<String> for Value {
-    fn into(self) -> String {
-        self.to_string()
+impl From<Value> for String {
+    fn from(value: Value) -> String {
+        value.to_string()
     }
 }
 
@@ -194,6 +194,7 @@ pub struct RegisterIndex(u16);
 impl RegisterIndex {
     pub const fn from_address(address: u16) -> Option<RegisterIndex> {
         let address = address as usize;
+        #[expect(clippy::if_same_then_else)]
         if ADDRESS_INDICES.len() <= address {
             None
         } else if ADDRESS_INDICES[address] == 0xFFFF {
@@ -1043,11 +1044,13 @@ pub static ADDRESS_INDICES: &[u16; 30107] = &const {
         }
     }
     for_each_register!(make_indices);
-    let _ = index; // last `index = index + 1` unrolled by `for_each_register!` makes
-                   // the `unused_assignments` lint fire.
+    // last `index = index + 1` unrolled by `for_each_register!` makes the `unused_assignments`
+    // lint fire.
+    let _ = index;
     array
 };
 
+#[expect(clippy::manual_range_patterns)]
 pub static DESCRIPTIONS: &[&str] = &const {
     let mut result = [""; ADDRESSES.len()];
     let mut index = 0;

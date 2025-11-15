@@ -5,10 +5,9 @@
 //!
 //! Everything else is bog-standard boolean/integer parameters.
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{string_enum, BooleanValue, UintValue};
-use crate::registers::Value;
-use homie5::device_description::HomieNodeDescription;
+use crate::homie::value::{BooleanValue, UintValue, string_enum};
 use homie5::HomieID;
+use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
