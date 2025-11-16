@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -107,30 +108,56 @@ impl RegisterPropertyValue for BooleanValue {
     }
 }
 
-pub(crate) struct UintValue(pub(crate) u16);
-impl TryFrom<Value> for UintValue {
+pub(crate) mod unit {
+    use homie5::HOMIE_UNIT_PERCENT;
+
+    pub(super) trait Unit {
+        const UNIT_STRING: Option<&'static str>;
+    }
+    pub(crate) struct None;
+    impl Unit for None {
+        const UNIT_STRING: Option<&'static str> = Option::None;
+    }
+    pub(crate) struct Rpm;
+    impl Unit for Rpm {
+        const UNIT_STRING: Option<&'static str> = Some("rpm");
+    }
+    pub(crate) struct Percent;
+    impl Unit for Percent {
+        const UNIT_STRING: Option<&'static str> = Some(HOMIE_UNIT_PERCENT);
+    }
+    pub(crate) struct Ppm;
+    impl Unit for Ppm {
+        const UNIT_STRING: Option<&'static str> = Some("ppm");
+    }
+}
+
+pub(crate) struct UintValue<U = unit::None>(pub(crate) u16, PhantomData<U>);
+impl<U> TryFrom<Value> for UintValue<U> {
     type Error = ();
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        Ok(Self(value.into_inner()))
+        Ok(Self(value.into_inner(), PhantomData))
     }
 }
-impl TryFrom<&str> for UintValue {
+impl<U> TryFrom<&str> for UintValue<U> {
     type Error = ();
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Ok(Self(value.parse().map_err(|_| ())?))
+        Ok(Self(value.parse().map_err(|_| ())?, PhantomData))
     }
 }
-impl PropertyValue for UintValue {
+impl<U: Send + Sync + 'static> PropertyValue for UintValue<U> {
     fn value(&self) -> String {
         self.0.to_string()
     }
 }
-impl PropertyDescription for UintValue {
+impl<U: unit::Unit> PropertyDescription for UintValue<U> {
     fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(HomieDataType::Integer).build()
+        let mut d = PropertyDescriptionBuilder::new(HomieDataType::Integer).build();
+        d.unit = U::UNIT_STRING.map(|u| u.to_string());
+        d
     }
 }
-impl RegisterPropertyValue for UintValue {
+impl<U> RegisterPropertyValue for UintValue<U> {
     fn to_modbus(&self) -> u16 {
         self.0
     }
