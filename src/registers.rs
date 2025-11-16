@@ -574,6 +574,18 @@ macro_rules! for_each_register {
             9001: U16, RW, "SYSTEM_UNIT_FLOW", min = 0, max = 2;
             9002: U16, RW, "SYSTEM_UNIT_PRESSURE", min = 0, max = 1;
             9003: U16, RW, "SYSTEM_UNIT_TEMPERATURE", min = 0, max = 1;
+            11101: U16, RW, "UI_1_MODE", min = 0, max = 2;
+            11102: U16, RW, "UI_2_MODE", min = 0, max = 2;
+            11103: U16, RW, "UI_3_MODE", min = 0, max = 2;
+            11104: U16, RW, "UI_4_MODE", min = 0, max = 2;
+            11105: U16, RW, "UI_5_MODE", min = 0, max = 2;
+            11106: U16, RW, "UI_6_MODE", min = 0, max = 2;
+            11201: U16, RW, "UI_1_FUNCTION";
+            11202: U16, RW, "UI_2_FUNCTION";
+            11203: U16, RW, "UI_3_FUNCTION";
+            11204: U16, RW, "UI_4_FUNCTION";
+            11205: U16, RW, "UI_5_FUNCTION";
+            11206: U16, RW, "UI_6_FUNCTION";
             11401: U16, RW, "DI_CONNECTION_1", min = 0, max = 18;
             11402: U16, RW, "DI_CONNECTION_2", min = 0, max = 18;
             11421: U16, RW, "DI_CFG_POLARITY_1", min = 0, max = 1;
@@ -602,6 +614,8 @@ macro_rules! for_each_register {
             12108: CEL, RW, "SENSOR_OHT", min = -400, max = 800;
             12109: U16, RW, "SENSOR_RHS", min = 0, max = 100;
             12112: U16, R_, "SENSOR_RGS", min = 0, max = 1;
+            12113: U16, RW, "SENSOR_MODBUS_CO2", min = 0, max = 2000;
+            12114: U16, RW, "SENSOR_MODBUS_RH", min = 0, max = 100;
             12115: U16, RW, "SENSOR_CO2S", min = 0, max = 2000;
             12136: U16, RW, "SENSOR_RHS_PDM", min = 0, max = 100;
             12151: U16, RW, "SENSOR_CO2S_1", min = 0, max = 2000;
@@ -638,6 +652,8 @@ macro_rules! for_each_register {
             12404: U16, R_, "SENSOR_FLOW_PIGGYBACK_EAF";
             12405: U16, R_, "SENSOR_DI_BYF";
             12544: CEL, RW, "SENSOR_PDM_EAT_VALUE", min = -400, max = 800;
+            12929: U16, RW, "MANUAL_OVERRIDE_F_INPUT_UI_SAFC_MODE", min = 0, max = 1;
+            12930: U16, RW, "MANUAL_OVERRIDE_F_INPUT_UI_EAFC_MODE", min = 0, max = 1;
             12931: U16, RW, "MANUAL_OVERRIDE_F_INPUT_UI_RH_MODE", min = 0, max = 1;
             12932: U16, RW, "MANUAL_OVERRIDE_F_INPUT_UI_CO2_MODE", min = 0, max = 1;
             12933: U16, RW, "MANUAL_OVERRIDE_F_INPUT_OAT_MODE", min = 0, max = 1;
@@ -672,6 +688,8 @@ macro_rules! for_each_register {
             12962: I16, RW, "MANUAL_OVERRIDE_INPUT_UI3_VALUE", min = 0, max = 100;
             12963: I16, RW, "MANUAL_OVERRIDE_INPUT_UI4_VALUE", min = 0, max = 100;
             12964: I16, RW, "MANUAL_OVERRIDE_INPUT_UI5_VALUE", min = 0, max = 100;
+            12979: I16, RW, "MANUAL_OVERRIDE_F_INPUT_SAFC_VALUE", min = 0, max = 100;
+            12980: I16, RW, "MANUAL_OVERRIDE_F_INPUT_EAFC_VALUE", min = 0, max = 100;
             12983: CEL, RW, "MANUAL_OVERRIDE_F_INPUT_OAT_VALUE", min = -410, max = 810;
             12984: CEL, RW, "MANUAL_OVERRIDE_F_INPUT_SAT_VALUE", min = -410, max = 810;
             12985: CEL, RW, "MANUAL_OVERRIDE_F_INPUT_OHT_VALUE", min = -410, max = 810;
@@ -1364,6 +1382,15 @@ pub static DESCRIPTIONS: &[&str] = &const {
             9001 => "Unit for CAV control mode. 0=l/s, 1=m³/h, 2=cfm",
             9002 => "Units for VAV control mode. 0=Pa, 1=InH2O",
             9003 => "Units for temperature. 0=Celsius, 1=Fahrenheit",
+            // These registers have been inferred from reversed information, so I don't know the
+            // meaning of these enums at the moment.
+            11101 | 11102 | 11103 | 11104 | 11105 | 11106 => {
+                "Universal input type. 0=?, 1=Analog, 2=?"
+            }
+            11201 | 11202 | 11203 | 11204 | 11205 | 11206 => {
+                "Universal input function. \
+                2=CO2 sensor, 3=External supply fan control, 4=External extract fan control"
+            }
             11401 | 11402 => {
                 "Indicates what kind of functionality is connected to the digital input. \
                  0=None, 1=Away, 2=BYP, 3=Vacuum Cleaner, 4=Cooker Hood, 5=Crowded, 6=EMT, \
@@ -1390,6 +1417,8 @@ pub static DESCRIPTIONS: &[&str] = &const {
             12108 => "Over Heat Temperature sensor (Electrical Heater)",
             12109 => "Relative Humidity Sensor (Accessory)",
             12112 => "Rotating guard Sensor input",
+            12113 => "Set a virtual CO2 sensor reading",
+            12114 => "Set a virtual RH sensor reading",
             12115 => "CO2 value (accessory)",
             12136 => "PDM RHS sensor value (standard)",
             12151 => "CO2 sensor value - UI1 (accessory)",
@@ -1422,13 +1451,12 @@ pub static DESCRIPTIONS: &[&str] = &const {
             12403 | 12404 => "Flow value calculated from piggyback pressure sensor.",
             12405 => "Value from Bypass Damper Feedback input.In %.",
             12544 => "PDM EAT sensor value (standard)",
-            12931 | 12932 | 12933 | 12934 | 12935 | 12936 | 12937 | 12938 | 12939 | 12940
-            | 12941 | 12942 | 12943 | 12944 | 12945 | 12946 | 12947 | 12948 | 12949 | 12950 => {
-                "Enable manual override of the device input. 0=AUTO, 1=OVERRIDE"
-            }
+            12929 | 12930 | 12931 | 12932 | 12933 | 12934 | 12935 | 12936 | 12937 | 12938
+            | 12939 | 12940 | 12941 | 12942 | 12943 | 12944 | 12945 | 12946 | 12947 | 12948
+            | 12949 | 12950 => "Enable manual override of the device input. 0=AUTO, 1=OVERRIDE",
             12951 | 12952 | 12953 | 12954 | 12955 | 12956 | 12957 | 12958 | 12959 | 12960
-            | 12961 | 12962 | 12963 | 12964 | 12983 | 12984 | 12985 | 12986 | 12987 | 12988
-            | 12989 | 12990 => "Value to override the device input with.",
+            | 12961 | 12962 | 12963 | 12964 | 12979 | 12980 | 12983 | 12984 | 12985 | 12986
+            | 12987 | 12988 | 12989 | 12990 => "Value to override the device input with.",
             13201 => "Indicates if the TRIAC shall be used",
             13301 | 13302 | 13303 | 13304 => "Digital output after multiplexer",
             13311 | 13312 | 13313 | 13314 | 13315 => "Analog output after multiplexer",
