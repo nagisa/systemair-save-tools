@@ -1,6 +1,7 @@
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    unit, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue, StopDelay, UintValue
+    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue,
+    StopDelay, UintValue, unit,
 };
 use crate::registers::Value;
 use homie5::HomieID;
