@@ -1,7 +1,6 @@
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
-    BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue,
-    StopDelay, UintValue,
+    unit, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue, RegisterPropertyValue, StopDelay, UintValue
 };
 use crate::registers::Value;
 use homie5::HomieID;
@@ -12,9 +11,9 @@ super::node::properties! { static PROPERTIES = [
     { "cooldown-active": BooleanValue = register "FUNCTION_ACTIVE_HEATER_COOL_DOWN" },
     { "remaining-cooldown-time": CooldownDuration = register "SPEED_ELECTRICAL_HEATER_HOT_COUNTER" },
     // INVERTED??
-    { "demand": UintValue = register "SATC_HEAT_DEMAND" },
+    { "demand": UintValue<unit::Percent> = register "SATC_HEAT_DEMAND" },
     { "active": BooleanValue = register "FUNCTION_ACTIVE_HEATING" },
-    { "current": UintValue = register "PWM_TRIAC_OUTPUT" },
+    { "current": UintValue<unit::Percent> = register "PWM_TRIAC_OUTPUT" },
     { "enable-eco": BooleanValue = register "ECO_MODE_ON_OFF" },
     { "eco-active": BooleanValue = register "ECO_FUNCTION_ACTIVE" },
     { "eco-temperature-offset": CelsiusValue = register "ECO_T_Y1_OFFSET" },

@@ -1,5 +1,5 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{BooleanValue, CelsiusValue, SpcHumidityValue, UintValue};
+use crate::homie::value::{unit, BooleanValue, CelsiusValue, SpcHumidityValue, UintValue};
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
@@ -8,15 +8,16 @@ super::node::properties! { static PROPERTIES = [
     { "active": BooleanValue = register "FUNCTION_ACTIVE_HEAT_RECOVERY" },
     // NOTE: although this is a generic output register, the modbus register documentation
     // specifies that this is specifically a heat exchanger AO value.
-    { "current-speed": UintValue = register "OUTPUT_Y2_ANALOG" },
+    { "current-speed": UintValue<unit::Percent> = register "OUTPUT_Y2_ANALOG" },
     { "defrosting-active": BooleanValue = register "FUNCTION_ACTIVE_DEFROSTING" },
     { "enable-cooling-recovery": BooleanValue = register "HEAT_EXCHANGER_COOLING_RECOVERY_ON_OFF" },
     { "cooling-recovery-limit": CelsiusValue = register "COOLER_RECOVERY_LIMIT_T" },
     { "cooling-recovery-active": BooleanValue = register "FUNCTION_ACTIVE_COOLING_RECOVERY" },
     { "enable-humidity-transfer": BooleanValue = register "ROTOR_RH_TRANSFER_CTRL_ON_OFF" },
     { "humidity-transfer-active": BooleanValue = register "FUNCTION_ACTIVE_MOISTURE_TRANSFER" },
-    { "humidity-transfer-setpoint": UintValue = register "ROTOR_RH_TRANSFER_CTRL_SETPOINT" },
-    { "humidity-transfer-pband": UintValue = register "ROTOR_RH_TRANSFER_CTRL_PBAND" },
+    { "humidity-transfer-setpoint": UintValue<unit::Percent> = register "ROTOR_RH_TRANSFER_CTRL_SETPOINT" },
+    { "humidity-transfer-pband": UintValue<unit::Percent> = register "ROTOR_RH_TRANSFER_CTRL_PBAND" },
+    // FIXME: should be duration
     { "humidity-transfer-itime": UintValue = register "ROTOR_RH_TRANSFER_CTRL_ITIME" },
     { "speed-limit-for-humidity-transfer": UintValue = register "HEAT_EXCHANGER_SPEED_LIMIT_RH_TRANSFER" },
     { "current-extract-air-humidity": SpcHumidityValue = register "ROTOR_EA_SPEC_HUMIDITY" },

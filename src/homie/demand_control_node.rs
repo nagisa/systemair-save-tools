@@ -5,27 +5,27 @@
 //!
 //! Everything else is bog-standard boolean/integer parameters.
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{BooleanValue, UintValue, string_enum};
+use crate::homie::value::{string_enum, unit, BooleanValue, UintValue};
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
-    { "highest-rh-sensor": UintValue = register "DEMC_RH_HIGHEST" },
-    { "highest-co2-sensor": UintValue = register "DEMC_CO2_HIGHEST" },
-    { "current-rh-setpoint": UintValue = register "DEMC_RH_PI_SP" },
-    { "current-rh": UintValue = register "DEMC_RH_PI_FEEDBACK" },
+    { "highest-rh-sensor": UintValue<unit::Percent> = register "DEMC_RH_HIGHEST" },
+    { "highest-co2-sensor": UintValue<unit::Ppm> = register "DEMC_CO2_HIGHEST" },
+    { "current-rh-setpoint": UintValue<unit::Percent> = register "DEMC_RH_PI_SP" },
+    { "current-rh": UintValue<unit::Percent> = register "DEMC_RH_PI_FEEDBACK" },
     { "current-rh-airflow-demand": UintValue = register "DEMC_RH_PI_OUTPUT" },
-    { "current-co2-setpoint": UintValue = register "DEMC_CO2_PI_SP" },
-    { "current-co2": UintValue = register "DEMC_CO2_PI_FEEDBACK" },
+    { "current-co2-setpoint": UintValue<unit::Ppm> = register "DEMC_CO2_PI_SP" },
+    { "current-co2": UintValue<unit::Ppm> = register "DEMC_CO2_PI_FEEDBACK" },
     { "current-co2-airflow-demand": UintValue = register "DEMC_CO2_PI_OUTPUT" },
-    { "rh-pband": UintValue = register "DEMC_RH_SETTINGS_PBAND" },
-    { "rh-summer-setpoint": UintValue = register "DEMC_RH_SETTINGS_SP_SUMMER" },
-    { "rh-winter-setpoint": UintValue = register "DEMC_RH_SETTINGS_SP_WINTER" },
+    { "rh-pband": UintValue<unit::Percent> = register "DEMC_RH_SETTINGS_PBAND" },
+    { "rh-summer-setpoint": UintValue<unit::Percent> = register "DEMC_RH_SETTINGS_SP_SUMMER" },
+    { "rh-winter-setpoint": UintValue<unit::Percent> = register "DEMC_RH_SETTINGS_SP_WINTER" },
     { "rh-enabled": BooleanValue = register "DEMC_RH_SETTINGS_ON_OFF" },
     { "season": Season = register "SUMMER_WINTER" },
-    { "co2-pband": UintValue = register "DEMC_CO2_SETTINGS_PBAND" },
-    { "co2-setpoint": UintValue = register "DEMC_CO2_SETTINGS_SP" },
+    { "co2-pband": UintValue<unit::Ppm> = register "DEMC_CO2_SETTINGS_PBAND" },
+    { "co2-setpoint": UintValue<unit::Ppm> = register "DEMC_CO2_SETTINGS_SP" },
     { "co2-enabled": BooleanValue = register "DEMC_CO2_SETTINGS_ON_OFF" },
     { "current-indoor-air-quality-level": IaqLevel = register "IAQ_LEVEL" },
 ] }

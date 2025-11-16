@@ -1,15 +1,15 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{BooleanValue, CelsiusValue, StopDelay, UintValue};
+use crate::homie::value::{unit, BooleanValue, CelsiusValue, StopDelay, UintValue};
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
 
 super::node::properties! { static PROPERTIES = [
     { "active": BooleanValue = register "FUNCTION_ACTIVE_COOLING" },
-    { "demand": UintValue = register "COOLER_FROM_SATC" },
+    { "demand": UintValue<unit::Percent> = register "COOLER_FROM_SATC" },
     // NOTE: although this is a generic output register, the modbus register documentation
     // specifies that this is specifically a cooler AO value.
-    { "current-speed": UintValue = register "OUTPUT_Y3_ANALOG" },
+    { "current-speed": UintValue<unit::Percent> = register "OUTPUT_Y3_ANALOG" },
     { "circulation-pump-start-temperature": CelsiusValue = register "COOLER_CIRC_PUMP_START_T" },
     { "outdoor-air-temperature-interlock": CelsiusValue = register "COOLER_OAT_INTERLOCK_T" },
     { "circulation-pump-stop-delay": StopDelay = register "COOLER_CIRC_PUMP_STOP_DELAY" },
