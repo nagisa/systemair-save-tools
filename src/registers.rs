@@ -1177,7 +1177,7 @@ pub static DESCRIPTIONS: &[&str] = &const {
             }
             1259 => "Compensation value during summer period",
             1274 => {
-                "Type of fan control mode. 0=Manual, 1=RPM, 2=VAV (Constant Pressure), 3=CAV \
+                "Type of fan control mode. 0=Percentage, 1=RPM, 2=VAV (Constant Pressure), 3=CAV \
                  (Constant Flow), 4=DCV (External)"
             }
             1301 => {
