@@ -145,7 +145,7 @@ string_enum! {
     #[repr(u16)]
     #[derive(Clone, Copy)]
     enum RegulationType {
-        Manual = 0,
+        Percentage = 0,
         Rpm = 1,
         ConstantPressure = 2,
         ConstantFlow = 3,
