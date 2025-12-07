@@ -263,24 +263,26 @@ impl TcpWorker {
         mut self,
         mut jobs: UnboundedReceiver<modbus::Request>,
     ) -> Result<(), Error> {
-        // FIXME: shouldn't await here, these should be part of select!
-        // somehow.
+        let mut pending_send: Option<modbus::Request> = None;
         'reconnect: loop {
             // If we are reconnecting and had any in-flight requests, it is only proper to report
             // them as timed out.
             for (transaction_id, _) in self.inflight.drain(..) {
                 self.responses.mark_timeout(transaction_id);
             }
+            if let Some(req) = pending_send.take() {
+                self.responses.mark_timeout(req.transaction_id);
+            }
+            // FIXME: shouldn't await here, these should be part of select!
+            // somehow.
             let (mut io_sink, mut io_source) = self.connect().await?.split();
             let mut send_time = pin::pin!(tokio::time::sleep_until(Instant::now()));
             let mut recv_time = pin::pin!(tokio::time::sleep_until(Instant::now()));
-            let mut pending_send = None;
             loop {
                 let time_to_send = send_time.is_elapsed();
                 tokio::select! {
                     biased;
                     send_result = io_sink.flush(), if pending_send.is_some() => {
-                        let req: Request = pending_send.take().unwrap();
                         if let Err(e) = send_result {
                             warn!(
                                 message="sending request failed, will reconnect",
@@ -288,6 +290,7 @@ impl TcpWorker {
                             );
                             continue 'reconnect;
                         }
+                        let req: Request = pending_send.take().unwrap();
                         let resp_len = req.expected_response_length().into();
                         let baudrate = self.args.baudrate;
                         let response_duration = Duration::from_secs(resp_len) / (baudrate / 10);
@@ -316,7 +319,7 @@ impl TcpWorker {
                     //
                     // This conditional select will make sure that we will always wait sleeping
                     // until the next available sending slot opens up.
-                    _ = &mut send_time, if pending_send.is_some() || !time_to_send => {
+                    _ = &mut send_time, if !time_to_send || pending_send.is_some() => {
                         if pending_send.is_some() {
                             warn!("sending a request timed out, will reconnect");
                             continue 'reconnect;
