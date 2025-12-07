@@ -82,7 +82,11 @@ impl Encoder<Request> for ModbusTCPCodec {
         match &req.operation {
             Operation::GetHoldings { address, count } => {
                 dst.extend(req.transaction_id.to_be_bytes());
-                dst.extend(&[0, 0, 0, 0, req.device_id, 3]);
+                let protoid = 0u16;
+                dst.extend(protoid.to_be_bytes());
+                let len = 6u16;
+                dst.extend(len.to_be_bytes());
+                dst.extend(&[req.device_id, 3]);
                 dst.extend((address - 1).to_be_bytes());
                 dst.extend(count.to_be_bytes());
             }
@@ -90,7 +94,11 @@ impl Encoder<Request> for ModbusTCPCodec {
                 let bytes = u8::try_from(values.len() * 2)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
                 dst.extend(req.transaction_id.to_be_bytes());
-                dst.extend(&[0, 0, 0, 0, req.device_id, 16]);
+                let protoid = 0u16;
+                dst.extend(protoid.to_be_bytes());
+                let len = 7u16 + u16::from(bytes);
+                dst.extend(len.to_be_bytes());
+                dst.extend(&[req.device_id, 16]);
                 dst.extend((address - 1).to_be_bytes());
                 dst.extend(u16::from(bytes / 2).to_be_bytes());
                 dst.extend(bytes.to_be_bytes());
