@@ -278,6 +278,8 @@ impl SystemAirDevice {
                         self.schedule_periodic_read(address, 1, duration);
                     }
 
+                    // FIXME: this logic of optimal ranges is at the wrong level of abstraction.
+                    // In particular with IAMv2 the limits are likely different.
                     for range in need_registers.find_optimal_ranges(modbus::MAX_SAFE_READ_COUNT) {
                         self.schedule_periodic_read(
                             *range.start(),
