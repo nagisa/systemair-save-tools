@@ -171,8 +171,7 @@ impl Connection {
     // }
 
     pub fn new_transaction_id(&self) -> u16 {
-        self.transaction_id_generator
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        self.transaction_id_generator.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub async fn send(
@@ -180,14 +179,9 @@ impl Connection {
         operation: modbus::Operation,
     ) -> Result<Option<modbus::Response>, Error> {
         let transaction_id = self.new_transaction_id();
-        let request = modbus::Request {
-            device_id: self.args.how.device_id,
-            transaction_id,
-            operation,
-        };
-        self.request_queue
-            .send(request)
-            .map_err(Error::ScheduleRequest)?;
+        let request =
+            modbus::Request { device_id: self.args.how.device_id, transaction_id, operation };
+        self.request_queue.send(request).map_err(Error::ScheduleRequest)?;
         Ok(self.response_tracker.wait_for(transaction_id).await)
     }
 
@@ -282,6 +276,21 @@ impl TcpWorker {
                 let time_to_send = send_time.is_elapsed();
                 tokio::select! {
                     biased;
+                    response = io_source.next() => {
+                        let Some(response) = response else {
+                            debug!(message="peer closed their connection, will reconnect");
+                            continue 'reconnect;
+                        };
+                        match response {
+                            Err(e) => return Err(Error::Receive(e)),
+                            Ok(response) => self.handle_response(response),
+                        }
+                        // If no other requests are in-flight, then IAM is idle and we can send a
+                        // request to it right away.
+                        if self.inflight.is_empty() {
+                            send_time.as_mut().reset(Instant::now());
+                        }
+                    }
                     send_result = io_sink.flush(), if pending_send.is_some() => {
                         if let Err(e) = send_result {
                             warn!(
@@ -301,12 +310,6 @@ impl TcpWorker {
                         recv_time.as_mut().reset(self.inflight[0].1);
                         send_time.as_mut().reset(response_ready_instant + *self.args.tcp_send_delay);
                     }
-                    Some(response) = io_source.next() => {
-                        match response {
-                            Err(e) => return Err(Error::Receive(e)),
-                            Ok(response) => self.handle_response(response, send_time.as_mut()),
-                        }
-                    }
                     _ = &mut recv_time, if !self.inflight.is_empty() => {
                         if !self.handle_timeout(recv_time.as_mut()) {
                             continue 'reconnect;
@@ -314,11 +317,14 @@ impl TcpWorker {
                     }
 
                     // We need to have some down time between sending out subsequent modbus
-                    // requests -- otherwise the IAM device gets somewhat confused and will
-                    // ignore some of the requests, leading them to time out.
+                    // requests -- otherwise the IAM v1 modbus gateway gets somewhat confused and
+                    // will ignore some of the requests altogether, leading them to time out.
                     //
-                    // This conditional select will make sure that we will always wait sleeping
-                    // until the next available sending slot opens up.
+                    // This conditional select will make sure that we pace our requests according
+                    // to the expected underlying serial communication speed. There's no real
+                    // reason to send more often than that even for non-IAM gateways, as the
+                    // communication between the gateway and the device behind it is limited to the
+                    // serial baudrate.
                     _ = &mut send_time, if !time_to_send || pending_send.is_some() => {
                         if pending_send.is_some() {
                             warn!("sending a request timed out, will reconnect");
@@ -364,19 +370,10 @@ impl TcpWorker {
         Ok(Framed::new(socket, ModbusTCPCodec {}))
     }
 
-    fn handle_response(
-        &mut self,
-        response: modbus::Response,
-        send_time: pin::Pin<&mut tokio::time::Sleep>,
-    ) {
-        trace!(
-            message = "decoded a response",
-            transaction = response.transaction_id
-        );
-        let inflight_index = self
-            .inflight
-            .iter()
-            .position(|(id, _)| *id == response.transaction_id);
+    fn handle_response(&mut self, response: modbus::Response) {
+        trace!(message = "decoded a response", transaction = response.transaction_id);
+        let inflight_index =
+            self.inflight.iter().position(|(id, _)| *id == response.transaction_id);
         let Some(inflight_index) = inflight_index else {
             debug!(
                 message = "a response we were not expecting",
@@ -398,9 +395,6 @@ impl TcpWorker {
             self.reconnect_countdown = self.args.reconnect_after_timeouts;
         };
         self.responses.add_response(response);
-        if self.inflight.is_empty() {
-            send_time.reset(Instant::now());
-        }
     }
 
     fn handle_timeout(&mut self, request_timeout: pin::Pin<&mut tokio::time::Sleep>) -> bool {
