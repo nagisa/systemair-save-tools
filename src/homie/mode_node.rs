@@ -153,7 +153,10 @@ impl AggregatePropertyValue for CurrentMode {
                     });
                 }
                 // Device takes a little bit of extra time to figure things out.
-                tokio::time::sleep(Duration::from_millis(1500)).await;
+                //
+                // FIXME: ideally this would be checking more frequently a few times in a loop
+                // until a change occurs.
+                tokio::time::sleep(Duration::from_millis(2000)).await;
                 let start_register = RegisterIndex::from_name("USERMODE_REMAINING_TIME_L").unwrap();
                 let end_register = RegisterIndex::from_name("USERMODE_MODE").unwrap();
                 let address = start_register.address();
