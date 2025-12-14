@@ -86,9 +86,7 @@ where
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<EventStream>> {
         let address = self.register.address();
-        let value = (value as Box<dyn std::any::Any>)
-            .downcast::<T>()
-            .expect("type confusion");
+        let value = (value as Box<dyn std::any::Any>).downcast::<T>().expect("type confusion");
         let values = vec![value.to_modbus()];
         Box::pin(futures::stream::once(async move {
             let operation = modbus::Operation::SetHoldings { address, values };
@@ -103,12 +101,7 @@ where
             }
             let operation = modbus::Operation::GetHoldings { address, count: 1 };
             let response = modbus.send_retrying(operation.clone()).await?.kind;
-            Ok(EventResult::HomieSet {
-                node_id,
-                prop_idx,
-                operation,
-                response,
-            })
+            Ok(EventResult::HomieSet { node_id, prop_idx, operation, response })
         })) as _
     }
 
@@ -119,9 +112,7 @@ where
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<EventStream>> {
-        let value = (value as Box<dyn std::any::Any>)
-            .downcast::<T>()
-            .expect("type confusion");
+        let value = (value as Box<dyn std::any::Any>).downcast::<T>().expect("type confusion");
         value.on_property_change(node_id, prop_idx, modbus)
     }
 
@@ -147,12 +138,7 @@ where
                     assert_eq!((min, max), (0, 1), "{} is not bool", register.address());
                     break 'no_format;
                 }
-                (HomieDataType::Integer, min, max) => IntegerRange {
-                    min,
-                    max,
-                    step: None,
-                }
-                .into(),
+                (HomieDataType::Integer, min, max) => IntegerRange { min, max, step: None }.into(),
                 (HomieDataType::Float, min, max) => FloatRange {
                     min: min.map(|v| v as f64 / register.data_type().scale() as f64),
                     max: max.map(|v| v as f64 / register.data_type().scale() as f64),
@@ -205,9 +191,7 @@ where
         if !T::SETTABLE {
             panic!("should never call homie_set_to_modbus for aggregates that aren't settable");
         }
-        let value = (value as Box<dyn std::any::Any>)
-            .downcast::<T>()
-            .expect("type confusion");
+        let value = (value as Box<dyn std::any::Any>).downcast::<T>().expect("type confusion");
         value.set(node_id, prop_idx, modbus)
     }
 
@@ -218,9 +202,7 @@ where
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<EventStream>> {
-        let value = (value as Box<dyn std::any::Any>)
-            .downcast::<T>()
-            .expect("type confusion");
+        let value = (value as Box<dyn std::any::Any>).downcast::<T>().expect("type confusion");
         value.on_property_change(node_id, prop_idx, modbus)
     }
 
@@ -262,9 +244,7 @@ where
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<EventStream>> {
-        let value = (value as Box<dyn std::any::Any>)
-            .downcast::<T>()
-            .expect("type confusion");
+        let value = (value as Box<dyn std::any::Any>).downcast::<T>().expect("type confusion");
         value.invoke(node_id, prop_idx, modbus)
     }
 
@@ -275,9 +255,7 @@ where
         modbus: Arc<Connection>,
         value: Box<DynPropertyValue>,
     ) -> Pin<Box<EventStream>> {
-        let value = (value as Box<dyn std::any::Any>)
-            .downcast::<T>()
-            .expect("type confusion");
+        let value = (value as Box<dyn std::any::Any>).downcast::<T>().expect("type confusion");
         value.on_property_change(node_id, prop_idx, modbus)
     }
 

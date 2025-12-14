@@ -18,22 +18,10 @@ pub enum ParseValueError {
 
 impl DataType {
     // Convenience aliases for nicely tabulated `for_each_register` macro definition below.
-    pub const U16: Self = Self {
-        scale: 1,
-        signed: false,
-    };
-    pub const I16: Self = Self {
-        scale: 1,
-        signed: true,
-    };
-    pub const CEL: Self = Self {
-        scale: 10,
-        signed: true,
-    };
-    pub const SPH: Self = Self {
-        scale: 10,
-        signed: false,
-    };
+    pub const U16: Self = Self { scale: 1, signed: false };
+    pub const I16: Self = Self { scale: 1, signed: true };
+    pub const CEL: Self = Self { scale: 10, signed: true };
+    pub const SPH: Self = Self { scale: 10, signed: false };
 
     pub fn from_bytes<'a>(self, mut bs: &'a [u8]) -> impl Iterator<Item = Value> + 'a {
         std::iter::from_fn(move || {
@@ -63,9 +51,7 @@ impl DataType {
             if scaled.fract() != 0.0 {
                 return Err(ParseValueError::FloatTooPrecise(float));
             }
-            (scaled as i64)
-                .try_into()
-                .map_err(ParseValueError::OutOfRange)
+            (scaled as i64).try_into().map_err(ParseValueError::OutOfRange)
         }
         Ok(match self {
             Self::I16 => Value::I16(string.parse().map_err(ParseValueError::Integer)?),

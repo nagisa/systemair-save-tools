@@ -47,10 +47,7 @@ impl Response {
         match &self.kind {
             ResponseKind::ErrorCode(c) => Some(*c),
             ResponseKind::GetHoldings { values: _ } => None,
-            ResponseKind::SetHoldings {
-                address: _,
-                words: _,
-            } => None,
+            ResponseKind::SetHoldings { address: _, words: _ } => None,
         }
     }
 
@@ -168,17 +165,11 @@ impl Decoder for ModbusTCPCodec {
                     device_id,
                     kind: match function_code {
                         3 => {
-                            let [_, _, _, values @ ..] = data else {
-                                unreachable!()
-                            };
-                            ResponseKind::GetHoldings {
-                                values: values.to_vec(),
-                            }
+                            let [_, _, _, values @ ..] = data else { unreachable!() };
+                            ResponseKind::GetHoldings { values: values.to_vec() }
                         }
                         16 => {
-                            let [_, _, a1, a2, w1, w2] = data else {
-                                unreachable!()
-                            };
+                            let [_, _, a1, a2, w1, w2] = data else { unreachable!() };
                             ResponseKind::SetHoldings {
                                 address: u16::from_be_bytes([*a1, *a2]),
                                 words: u16::from_be_bytes([*w1, *w2]),
@@ -222,7 +213,5 @@ pub fn extract_value(request_base: u16, value_address: u16, response: &[u8]) -> 
     let value_register = RegisterIndex::from_address(value_address).unwrap();
     let value_offset = 2 * usize::from(value_address - request_base);
     let value_data_type = value_register.data_type();
-    value_data_type
-        .from_bytes(&response[value_offset..][..value_data_type.bytes()])
-        .next()
+    value_data_type.from_bytes(&response[value_offset..][..value_data_type.bytes()]).next()
 }

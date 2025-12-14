@@ -52,12 +52,7 @@ impl Node for FreeCoolingNode {
 struct TimeValue(jiff::civil::Time);
 impl TimeValue {
     fn new(hour: Value, minute: Value) -> Result<Self, ()> {
-        Ok(Self(jiff::civil::time(
-            hour.into_inner() as _,
-            minute.into_inner() as _,
-            0,
-            0,
-        )))
+        Ok(Self(jiff::civil::time(hour.into_inner() as _, minute.into_inner() as _, 0, 0)))
     }
 }
 impl PropertyValue for TimeValue {
@@ -96,9 +91,7 @@ impl AggregatePropertyValue for TimeValue {
 
 impl PropertyDescription for TimeValue {
     fn description(_prop: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(homie5::HomieDataType::Datetime)
-            .settable(true)
-            .build()
+        PropertyDescriptionBuilder::new(homie5::HomieDataType::Datetime).settable(true).build()
     }
 }
 impl TryFrom<&str> for TimeValue {

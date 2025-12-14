@@ -78,16 +78,12 @@ impl TryFrom<&str> for ReplacementPeriod {
                 "filter replacement period out of range"
             )));
         }
-        Ok(Self {
-            months: months.round() as u16,
-        })
+        Ok(Self { months: months.round() as u16 })
     }
 }
 impl From<Value> for ReplacementPeriod {
     fn from(value: Value) -> Self {
-        Self {
-            months: value.into_inner(),
-        }
+        Self { months: value.into_inner() }
     }
 }
 
