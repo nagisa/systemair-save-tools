@@ -1,6 +1,7 @@
-use crate::modbus::{self, ModbusTCPCodec, Request};
+use crate::modbus::{self, ModbusTCPCodec, Request, Response};
 use futures::{SinkExt, StreamExt as _};
 use std::collections::{BTreeMap, VecDeque};
+use std::ops::Range;
 use std::path::PathBuf;
 use std::pin;
 use std::sync::atomic::AtomicU16;
@@ -32,6 +33,22 @@ pub enum Error {
     Send(#[source] std::io::Error),
     #[error("could not flush out the request")]
     Flush(#[source] std::io::Error),
+    #[error("could not construct the HTTP client")]
+    CreateReqwest(#[source] reqwest::Error),
+    #[error("modbus read API request failed")]
+    Iam2Read(#[source] reqwest::Error),
+    #[error("IAM2 response returned malformed JSON response")]
+    Iam2JsonDecode(#[source] reqwest::Error),
+    #[error("IAM2 response is not an object")]
+    Iam2ResponseIsntObject,
+    #[error("IAM2 response does not contain values for all the registers (requested {0}, got {1})")]
+    Iam2ResponseIncomplete(u16, usize),
+    #[error("IAM2 response is weird (found key {0}, but requested {1:?})")]
+    Iam2ResponseWeirdKeys(u16, Range<u16>),
+    #[error("IAM2 response contains register value that isn't numeric")]
+    Iam2ValueIsntNumber,
+    #[error("modbus write API request failed")]
+    Iam2Write(#[source] reqwest::Error),
 }
 
 #[derive(Default)]
@@ -71,6 +88,11 @@ impl ResponseTracker {
 pub struct Args {
     #[clap(flatten)]
     how: ConnectionGroup,
+
+    /// The modbus device ID.
+    #[arg(long, short = 'i')]
+    device_id: u8,
+
     /// If the modbus response isn't received in this amount of time plus the expected internal
     /// read-out time, consider the request failed.
     ///
@@ -109,15 +131,17 @@ pub struct Args {
 #[derive(clap::Parser, Clone)]
 #[group(required = true)]
 pub struct ConnectionGroup {
-    /// Connect to the SystemAIR device over Modbus TCP (usually available via the IAM module).
-    #[arg(long, short = 't')]
+    /// Connect to the SystemAIR device over Modbus TCP (e.g. available via the IAM v1 module).
+    #[arg(long)]
     tcp: Option<String>,
+    /// Connect to the SystemAIR device over IAM v2 HTTP API.
+    #[arg(long)]
+    iam2: Option<reqwest::Url>,
     /// Connect to the SystemAIR device over Serial Modbus RTU.
-    #[arg(long, short = 'd')]
-    device: Option<PathBuf>,
-    /// The modbus device ID.
-    #[arg(long, short = 'i')]
-    device_id: u8,
+    ///
+    /// Specify the path to the serial device.
+    #[arg(long)]
+    rtu: Option<PathBuf>,
 }
 
 pub struct Connection {
@@ -140,8 +164,10 @@ impl Connection {
                 inflight: VecDeque::with_capacity(8),
             }
             .spawn(jobs)
-        } else if args.how.device.is_some() {
-            todo!("direct Modbus RTU is not implemented yet");
+        } else if args.how.iam2.is_some() {
+            Iam2Worker { args: args.clone(), responses: Arc::clone(&response_tracker) }.spawn(jobs)
+        } else if args.how.rtu.is_some() {
+            todo!("Modbus RTU over direct serial is not implemented yet");
         } else {
             panic!("both `--tcp` and `--device` are `None`?");
         };
@@ -171,8 +197,7 @@ impl Connection {
     // }
 
     pub fn new_transaction_id(&self) -> u16 {
-        self.transaction_id_generator
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        self.transaction_id_generator.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     pub async fn send(
@@ -180,14 +205,8 @@ impl Connection {
         operation: modbus::Operation,
     ) -> Result<Option<modbus::Response>, Error> {
         let transaction_id = self.new_transaction_id();
-        let request = modbus::Request {
-            device_id: self.args.how.device_id,
-            transaction_id,
-            operation,
-        };
-        self.request_queue
-            .send(request)
-            .map_err(Error::ScheduleRequest)?;
+        let request = modbus::Request { device_id: self.args.device_id, transaction_id, operation };
+        self.request_queue.send(request).map_err(Error::ScheduleRequest)?;
         Ok(self.response_tracker.wait_for(transaction_id).await)
     }
 
@@ -198,7 +217,9 @@ impl Connection {
     ) -> Result<modbus::Response, Error> {
         loop {
             let response = self.send(operation.clone()).await?;
-            let Some(response) = response else { continue };
+            let Some(response) = response else {
+                continue;
+            };
             if response.is_server_busy() {
                 self.handle_server_busy().await;
                 continue;
@@ -369,14 +390,9 @@ impl TcpWorker {
         response: modbus::Response,
         send_time: pin::Pin<&mut tokio::time::Sleep>,
     ) {
-        trace!(
-            message = "decoded a response",
-            transaction = response.transaction_id
-        );
-        let inflight_index = self
-            .inflight
-            .iter()
-            .position(|(id, _)| *id == response.transaction_id);
+        trace!(message = "decoded a response", transaction = response.transaction_id);
+        let inflight_index =
+            self.inflight.iter().position(|(id, _)| *id == response.transaction_id);
         let Some(inflight_index) = inflight_index else {
             debug!(
                 message = "a response we were not expecting",
@@ -420,5 +436,123 @@ impl TcpWorker {
             request_timeout.reset(*timeout);
         }
         true
+    }
+}
+
+struct Iam2Worker {
+    args: Args,
+    responses: Arc<ResponseTracker>,
+}
+
+impl Iam2Worker {
+    fn spawn(
+        self,
+        jobs: UnboundedReceiver<modbus::Request>,
+    ) -> tokio::task::JoinHandle<Result<(), Error>> {
+        tokio::task::spawn(self.main_loop(jobs))
+    }
+
+    async fn main_loop(self, mut jobs: UnboundedReceiver<modbus::Request>) -> Result<(), Error> {
+        let mut url = self.args.how.iam2.clone().expect("have url when creating Iam2Worker");
+        // This initial segment push
+        // a) checks the usability of the url for what we're doing; and
+        // b) simplifies the handling of the mread/mwrite management (we can just unconditionally
+        //    pop away the last segment later)
+        url.path_segments_mut().expect("TODO").push("mwrite");
+        let http_client = reqwest::Client::builder()
+            .read_timeout(*self.args.read_timeout)
+            .timeout(self.args.read_timeout.saturating_add(*self.args.send_timeout))
+            .build()
+            .map_err(Error::CreateReqwest)?;
+        let mut pending_reads = futures::stream::SelectAll::new();
+        let mut pending_writes = futures::stream::SelectAll::new();
+        loop {
+            tokio::select! {
+                job = jobs.recv() => {
+                    let Some(req) = job else { return Ok(()) };
+                    match req.operation {
+                        modbus::Operation::GetHoldings { address, count } => {
+                            url.path_segments_mut().expect("TODO").pop().push("mread");
+                            let obj = serde_json::json!({address.to_string(): count});
+                            url.set_query(Some(&serde_json::to_string(&obj).unwrap()));
+                            let resp = http_client.get(url.clone()).send();
+                            let expected_keys = address..address + count;
+                            pending_reads.push(Box::pin(async_stream::stream! {
+                                let resp = resp.await.map_err(Error::Iam2Read)?;
+                                let resp = resp.json::<serde_json::Value>().await;
+                                let resp = resp.map_err(Error::Iam2JsonDecode)?;
+                                let obj = resp.as_object().ok_or(Error::Iam2ResponseIsntObject)?;
+                                // Can we trust IAM2.0 to respond within reason?
+                                let mut results = obj.iter()
+                                    .filter_map(|(k, v)| {
+                                        let Ok(address) = k.parse::<u16>() else {
+                                            return None;
+                                        };
+                                        let Some(value) = v.as_i64() else {
+                                            tracing::warn!(
+                                                key = k,
+                                                unexpected_val = ?v,
+                                                "address value isn't integer"
+                                            );
+                                            return None;
+                                        };
+                                        Some((address, value as i16 as u16))
+                                    }).collect::<Vec<_>>();
+                                results.sort_unstable();
+                                if results.len() < usize::from(count) {
+                                    yield Err(Error::Iam2ResponseIncomplete(count, results.len()));
+                                    return
+                                }
+                                let mut values = Vec::with_capacity(results.len());
+                                for ((a, v), ea) in results.into_iter().zip(expected_keys.clone()) {
+                                    if a != ea {
+                                        yield Err(Error::Iam2ResponseWeirdKeys(a, expected_keys));
+                                        return
+                                    }
+                                    values.extend(u16::to_be_bytes(v));
+                                }
+                                yield Ok(Response {
+                                    device_id: req.device_id,
+                                    transaction_id: req.transaction_id,
+                                    kind: modbus::ResponseKind::GetHoldings { values }
+                                })
+                            }));
+                        },
+                        modbus::Operation::SetHoldings { address, values } => {
+                            url.path_segments_mut().expect("TODO").pop().push("mwrite");
+                            let map = (address..).zip(values.iter())
+                                .map(|(a, b)| (a.to_string(), serde_json::json!(b)))
+                                .collect();
+                            let query = serde_json::Value::Object(map);
+                            url.set_query(Some(&serde_json::to_string(&query).unwrap()));
+                            let resp = http_client.get(url.clone()).send();
+                            pending_writes.push(Box::pin(async_stream::stream! {
+                                let resp = resp.await.map_err(Error::Iam2Read)?;
+                                let resp = resp.json::<serde_json::Value>().await;
+                                let resp = resp.map_err(Error::Iam2JsonDecode)?;
+                                let _obj = resp.as_object().ok_or(Error::Iam2ResponseIsntObject)?;
+                                // TODO: check that write succeeded?
+                                yield Ok(Response {
+                                    device_id: req.device_id,
+                                    transaction_id: req.transaction_id,
+                                    kind: modbus::ResponseKind::SetHoldings {
+                                        address,
+                                        words: values.len() as u16
+                                    }
+                                });
+                            }));
+                        },
+                    }
+                },
+                Some(response) = pending_reads.next() => {
+                    let response = response?;
+                    self.responses.add_response(response);
+                },
+                Some(response) = pending_writes.next() => {
+                    let response = response?;
+                    self.responses.add_response(response);
+                },
+            }
+        }
     }
 }
