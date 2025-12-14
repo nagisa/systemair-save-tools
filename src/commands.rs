@@ -44,10 +44,7 @@ pub mod registers {
             use std::iter::zip;
             zip(
                 zip(
-                    zip(
-                        zip(zip(zip(ADDRESSES, NAMES), MODES), DATA_TYPES),
-                        MINIMUM_VALUES,
-                    ),
+                    zip(zip(zip(zip(ADDRESSES, NAMES), MODES), DATA_TYPES), MINIMUM_VALUES),
                     MAXIMUM_VALUES,
                 ),
                 DESCRIPTIONS,
@@ -107,11 +104,7 @@ pub mod registers {
                             register.address.to_string(),
                             register.name.to_string(),
                             register.mode.to_string(),
-                            if register.signed {
-                                "i16".to_string()
-                            } else {
-                                "u16".to_string()
-                            },
+                            if register.signed { "i16".to_string() } else { "u16".to_string() },
                             register.scale.to_string(),
                             register.minimum.map(|v| v.to_string()).unwrap_or_default(),
                             register.maximum.map(|v| v.to_string()).unwrap_or_default(),
@@ -192,47 +185,31 @@ pub mod read {
     }
 
     enum ReadRequest {
-        SingleRegister {
-            address: u16,
-            index: Option<RegisterIndex>,
-        },
-        RegisterRange {
-            address_start: u16,
-            address_end: u16,
-        },
+        SingleRegister { address: u16, index: Option<RegisterIndex> },
+        RegisterRange { address_start: u16, address_end: u16 },
     }
 
     impl ReadRequest {
         fn to_operation(&self) -> Operation {
             match self {
-                ReadRequest::SingleRegister { address, index: _ } => Operation::GetHoldings {
-                    address: *address,
-                    count: 1,
-                },
-                ReadRequest::RegisterRange {
-                    address_start,
-                    address_end,
-                } => Operation::GetHoldings {
-                    address: *address_start,
-                    count: address_end
-                        .checked_sub(*address_start)
-                        .expect("no overflow"),
-                },
+                ReadRequest::SingleRegister { address, index: _ } => {
+                    Operation::GetHoldings { address: *address, count: 1 }
+                }
+                ReadRequest::RegisterRange { address_start, address_end } => {
+                    Operation::GetHoldings {
+                        address: *address_start,
+                        count: address_end.checked_sub(*address_start).expect("no overflow"),
+                    }
+                }
             }
         }
     }
 
     #[tokio::main(flavor = "current_thread")]
     pub async fn run(args: Args) -> Result<(), Error> {
-        let Args {
-            registers,
-            connection,
-            output,
-        } = args;
+        let Args { registers, connection, output } = args;
         run_with_connection(&registers, output, async move {
-            Connection::new(connection)
-                .await
-                .map_err(Error::Communicate)
+            Connection::new(connection).await.map_err(Error::Communicate)
         })
         .await
     }
@@ -259,10 +236,7 @@ pub mod read {
                     if address_end <= address_start {
                         return Err(Error::RegisterRangeEmpty(address_start, address_end));
                     }
-                    return Ok(ReadRequest::RegisterRange {
-                        address_start,
-                        address_end,
-                    });
+                    return Ok(ReadRequest::RegisterRange { address_start, address_end });
                 }
                 if let Some(i) = RegisterIndex::from_name(register) {
                     return Ok(ReadRequest::SingleRegister {
@@ -294,10 +268,8 @@ pub mod read {
             let (read_request, response) = &response?;
             let responses = match read_request {
                 ReadRequest::SingleRegister { address, index } => vec![(*address, *index, 0)],
-                ReadRequest::RegisterRange {
-                    address_start,
-                    address_end,
-                } => (*address_start..*address_end)
+                ReadRequest::RegisterRange { address_start, address_end } => (*address_start
+                    ..*address_end)
                     .zip((0..).step_by(2))
                     .map(|(address, value_offset)| {
                         (address, RegisterIndex::from_address(address), value_offset)
@@ -334,9 +306,7 @@ pub mod read {
                         },
                         || {
                             let name = register_index.map(|r| r.name());
-                            let dt = register_index
-                                .map(|r| r.data_type())
-                                .unwrap_or(DataType::U16);
+                            let dt = register_index.map(|r| r.data_type()).unwrap_or(DataType::U16);
                             let (values, exception) = match &response.kind {
                                 ResponseKind::ErrorCode(e) => (None, Some(*e)),
                                 ResponseKind::GetHoldings { values } => {
@@ -345,12 +315,7 @@ pub mod read {
                                 }
                                 ResponseKind::SetHoldings { .. } => (None, None),
                             };
-                            OutputSchema {
-                                address,
-                                name,
-                                values,
-                                exception,
-                            }
+                            OutputSchema { address, name, values, exception }
                         },
                     )
                     .map_err(Error::WriteOutput)?;
@@ -435,10 +400,7 @@ pub mod write {
                 .map_err(Error::Communicate)?;
             let address = register.address();
             match outcome {
-                Some(Response {
-                    kind: ResponseKind::ErrorCode(c),
-                    ..
-                }) => {
+                Some(Response { kind: ResponseKind::ErrorCode(c), .. }) => {
                     tracing::warn!(
                         address,
                         exception = c,
@@ -446,11 +408,7 @@ pub mod write {
                     )
                 }
                 Some(Response {
-                    kind:
-                        ResponseKind::SetHoldings {
-                            address,
-                            words: count,
-                        },
+                    kind: ResponseKind::SetHoldings { address, words: count },
                     ..
                 }) => {
                     tracing::info!(address, count, "registers set")
@@ -536,10 +494,8 @@ pub mod mqtt {
     pub async fn run(args: Args) -> Result<(), Error> {
         let mut mqtt_options = MqttOptions::parse_url(&args.mqtt_broker)
             .map_err(|e| Error::InvalidBrokerAddress(e, args.mqtt_broker))?;
-        if let Some((u, p)) = args
-            .mqtt_user
-            .as_ref()
-            .and_then(|u| Some((u, args.mqtt_password.as_ref()?)))
+        if let Some((u, p)) =
+            args.mqtt_user.as_ref().and_then(|u| Some((u, args.mqtt_password.as_ref()?)))
         {
             mqtt_options.set_credentials(u, p);
         }

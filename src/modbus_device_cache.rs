@@ -63,10 +63,8 @@ impl RegisterBitmask {
                 }
                 let cost_of_this_range = (1, range_len as u64);
                 let cost_of_rest = dp[j + 1];
-                let current_total_cost = (
-                    cost_of_this_range.0 + cost_of_rest.0,
-                    cost_of_this_range.1 + cost_of_rest.1,
-                );
+                let current_total_cost =
+                    (cost_of_this_range.0 + cost_of_rest.0, cost_of_this_range.1 + cost_of_rest.1);
                 if current_total_cost.0 < best_cost.0
                     || (current_total_cost.0 == best_cost.0 && current_total_cost.1 < best_cost.1)
                 {
@@ -98,11 +96,7 @@ pub(crate) struct SetBitsIterator<'a> {
 
 impl<'a> SetBitsIterator<'a> {
     pub(crate) fn new(bitmask: &'a RegisterBitmask) -> Self {
-        SetBitsIterator {
-            bitmask,
-            word_index: 0,
-            current_word_val: bitmask.0[0],
-        }
+        SetBitsIterator { bitmask, word_index: 0, current_word_val: bitmask.0[0] }
     }
 }
 
@@ -132,10 +126,7 @@ pub(crate) struct ModbusDeviceValues {
 
 impl ModbusDeviceValues {
     pub(crate) fn new() -> Self {
-        Self {
-            values: [0; _],
-            have_value: RegisterBitmask::new(),
-        }
+        Self { values: [0; _], have_value: RegisterBitmask::new() }
     }
 
     pub(crate) fn contains(&self, address: u16) -> bool {

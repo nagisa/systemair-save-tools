@@ -32,26 +32,10 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 pub(crate) enum EventResult {
-    Periodic {
-        operation: Operation,
-        response: ResponseKind,
-    },
-    HomieNotSet {
-        node_id: HomieID,
-        prop_idx: usize,
-        why: &'static str,
-    },
-    HomieSet {
-        node_id: HomieID,
-        prop_idx: usize,
-        operation: Operation,
-        response: ResponseKind,
-    },
-    ActionResponse {
-        node_id: HomieID,
-        prop_idx: usize,
-        value: Box<DynPropertyValue>,
-    },
+    Periodic { operation: Operation, response: ResponseKind },
+    HomieNotSet { node_id: HomieID, prop_idx: usize, why: &'static str },
+    HomieSet { node_id: HomieID, prop_idx: usize, operation: Operation, response: ResponseKind },
+    ActionResponse { node_id: HomieID, prop_idx: usize, value: Box<DynPropertyValue> },
 }
 
 #[derive(Debug)]
@@ -113,25 +97,18 @@ impl std::str::FromStr for PollConfig {
         let Some((nodeprop, duration)) = value.split_once("=") else {
             return Err(Error::SplitPollConfigEqualSign(value.to_string()));
         };
-        let duration = duration
-            .parse()
-            .map_err(|e| Error::PollParseDuration(e, value.to_string()))?;
+        let duration =
+            duration.parse().map_err(|e| Error::PollParseDuration(e, value.to_string()))?;
         let (node_id, prop_id) = match nodeprop.split_once("/") {
             Some((node_id, prop_id)) => (node_id, Some(prop_id)),
             None => (nodeprop, None),
         };
-        let node_id = node_id
-            .parse()
-            .map_err(|e| Error::PollParseHomieId(e, value.to_string()))?;
+        let node_id = node_id.parse().map_err(|e| Error::PollParseHomieId(e, value.to_string()))?;
         let prop_id = prop_id
             .map(|v| v.parse())
             .transpose()
             .map_err(|e| Error::PollParseHomieId(e, value.to_string()))?;
-        Ok(Self {
-            node_id,
-            prop_id,
-            duration,
-        })
+        Ok(Self { node_id, prop_id, duration })
     }
 }
 
@@ -250,20 +227,14 @@ impl SystemAirDevice {
                 homie5::DevicePublishStep::DeviceStateInit => {
                     self.state = HomieDeviceStatus::Init;
                     let p = self.protocol.publish_state(self.state);
-                    self.mqtt
-                        .homie_publish(p)
-                        .await
-                        .map_err(Error::PublishStateInit)?;
+                    self.mqtt.homie_publish(p).await.map_err(Error::PublishStateInit)?;
                 }
                 homie5::DevicePublishStep::DeviceDescription => {
                     let p = self
                         .protocol
                         .publish_description(&self.description)
                         .map_err(Error::BuildDeviceDescription)?;
-                    self.mqtt
-                        .homie_publish(p)
-                        .await
-                        .map_err(Error::PublishDeviceDescription)?;
+                    self.mqtt.homie_publish(p).await.map_err(Error::PublishDeviceDescription)?;
                 }
                 homie5::DevicePublishStep::PropertyValues => {
                     tracing::info!("waiting for device read out…");
@@ -334,19 +305,13 @@ impl SystemAirDevice {
                         .map_err(Error::ConstructTopicSubscriptions)?
                         .peekable();
                     if p.peek().is_some() {
-                        self.mqtt
-                            .homie_subscribe(p)
-                            .await
-                            .map_err(Error::Subscribe)?;
+                        self.mqtt.homie_subscribe(p).await.map_err(Error::Subscribe)?;
                     }
                 }
                 homie5::DevicePublishStep::DeviceStateReady => {
                     self.state = HomieDeviceStatus::Ready;
                     let p = self.protocol.publish_state(self.state);
-                    self.mqtt
-                        .homie_publish(p)
-                        .await
-                        .map_err(Error::PublishStateReady)?;
+                    self.mqtt.homie_publish(p).await.map_err(Error::PublishStateReady)?;
                     tracing::debug!("device became ready...");
                 }
             }
@@ -365,10 +330,7 @@ impl SystemAirDevice {
                     Ok(r) => r,
                     Err(e) => return Some((Err(e), when + period)),
                 };
-                let result = EventResult::Periodic {
-                    operation,
-                    response: response.kind,
-                };
+                let result = EventResult::Periodic { operation, response: response.kind };
                 Some((Ok(result), when + period))
             }
         });
@@ -386,17 +348,11 @@ impl SystemAirDevice {
         let prop = &node.properties()[prop_idx];
         let prop_id = &prop.prop_id;
         let Some(pd) = self.description.get_property_by_id(node_id, prop_id) else {
-            tracing::warn!(
-                ?node_id,
-                ?prop_id,
-                "property change event without description"
-            );
+            tracing::warn!(?node_id, ?prop_id, "property change event without description");
             return Ok(());
         };
         let val = new.value();
-        let msg = self
-            .protocol
-            .publish_value(node_id, prop_id, &val, pd.retained);
+        let msg = self.protocol.publish_value(node_id, prop_id, &val, pd.retained);
         self.mqtt
             .homie_publish(msg)
             .await
@@ -414,19 +370,13 @@ impl SystemAirDevice {
         let prop = &node.properties()[prop_idx];
         let prop_id = &prop.prop_id;
         let Some(pd) = self.description.get_property_by_id(node_id, prop_id) else {
-            tracing::warn!(
-                ?node_id,
-                ?prop_id,
-                "property change event without description"
-            );
+            tracing::warn!(?node_id, ?prop_id, "property change event without description");
             return Ok(());
         };
         let Some(tgt) = new.target() else {
             return Ok(());
         };
-        let msg = self
-            .protocol
-            .publish_target(node_id, prop_id, &tgt, pd.retained);
+        let msg = self.protocol.publish_target(node_id, prop_id, &tgt, pd.retained);
         self.mqtt
             .homie_publish(msg)
             .await
@@ -560,10 +510,8 @@ impl SystemAirDevice {
                 let node_id = node.node_id().clone();
                 let prop_id = property.prop_id().clone();
                 let properties = node.properties();
-                let property = properties
-                    .iter()
-                    .enumerate()
-                    .find(|(_, p)| &p.prop_id == property.prop_id());
+                let property =
+                    properties.iter().enumerate().find(|(_, p)| &p.prop_id == property.prop_id());
                 let Some((prop_idx, property)) = property else {
                     return Err(Error::UnknownProperty(node_id, prop_id));
                 };
@@ -608,10 +556,7 @@ impl SystemAirDevice {
 
     async fn handle_event_result(&mut self, result: EventResult) -> Result<(), Error> {
         match result {
-            EventResult::Periodic {
-                operation,
-                response: ResponseKind::ErrorCode(code),
-            } => {
+            EventResult::Periodic { operation, response: ResponseKind::ErrorCode(code) } => {
                 tracing::error!(code, ?operation, "modbus server exception occurred");
                 return Ok(());
             }
@@ -624,11 +569,7 @@ impl SystemAirDevice {
                 })
                 .await?;
             }
-            EventResult::HomieNotSet {
-                node_id,
-                prop_idx,
-                why,
-            } => {
+            EventResult::HomieNotSet { node_id, prop_idx, why } => {
                 let node = self.nodes.get(&node_id);
                 let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
                 let prop = &node.properties()[prop_idx];
@@ -676,13 +617,8 @@ impl SystemAirDevice {
                 })
                 .await?;
             }
-            EventResult::ActionResponse {
-                node_id,
-                prop_idx,
-                value,
-            } => {
-                self.handle_value_change(&node_id, prop_idx, &*value)
-                    .await?;
+            EventResult::ActionResponse { node_id, prop_idx, value } => {
+                self.handle_value_change(&node_id, prop_idx, &*value).await?;
             }
             EventResult::Periodic { .. } => unreachable!("EventResult::Periodic"),
             EventResult::HomieSet { .. } => unreachable!("EventResult::HomieSet"),
@@ -705,8 +641,7 @@ impl MqttClientExt for rumqttc::v5::AsyncClient {
     type PublishError = rumqttc::v5::ClientError;
     type SubscribeError = rumqttc::v5::ClientError;
     async fn homie_publish(&self, p: Publish) -> Result<(), Self::PublishError> {
-        self.publish(p.topic, convert_qos(p.qos), p.retain, p.payload)
-            .await
+        self.publish(p.topic, convert_qos(p.qos), p.retain, p.payload).await
     }
 
     async fn homie_subscribe(
@@ -732,10 +667,7 @@ pub fn convert_qos(homie: QoS) -> rumqttc::v5::mqttbytes::QoS {
 
 #[derive(Debug)]
 pub(crate) enum Command {
-    Set {
-        property: PropertyRef,
-        value: String,
-    },
+    Set { property: PropertyRef, value: String },
 }
 
 impl Command {
@@ -747,13 +679,9 @@ impl Command {
             return Err(msg);
         };
         match homie5::parse_mqtt_message(topic, &msg.payload) {
-            Ok(homie5::Homie5Message::PropertySet {
-                property,
-                set_value,
-            }) => Ok(Self::Set {
-                property,
-                value: set_value,
-            }),
+            Ok(homie5::Homie5Message::PropertySet { property, set_value }) => {
+                Ok(Self::Set { property, value: set_value })
+            }
             _ => Err(msg),
         }
     }

@@ -221,9 +221,7 @@ impl RegisterPropertyValue for SpcHumidityValue {
 }
 impl PropertyDescription for SpcHumidityValue {
     fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(HomieDataType::Float)
-            .unit("g/kg")
-            .build()
+        PropertyDescriptionBuilder::new(HomieDataType::Float).unit("g/kg").build()
     }
 }
 
@@ -249,9 +247,7 @@ impl TryFrom<&str> for StopDelay {
         let span = value.parse::<jiff::Span>()?;
         let minutes = span.total(jiff::Unit::Minute)?;
         if !(0.0..=20.0).contains(&minutes) {
-            return Err(jiff::Error::from_args(format_args!(
-                "pump stop delay out of range"
-            )));
+            return Err(jiff::Error::from_args(format_args!("pump stop delay out of range")));
         }
         Ok(Self(minutes.round() as u16))
     }
@@ -268,9 +264,7 @@ impl RemainingTimeValue {
         let seconds_remaining = u32::from(h.into_inner()) << 16 | u32::from(l.into_inner());
         let span = jiff::Span::new().seconds(seconds_remaining);
         let now = jiff::Zoned::now();
-        let round_cfg = jiff::SpanRound::new()
-            .largest(jiff::Unit::Month)
-            .relative(&now);
+        let round_cfg = jiff::SpanRound::new().largest(jiff::Unit::Month).relative(&now);
         Ok(Self(span.round(round_cfg).map_err(|_| ())?))
     }
 }

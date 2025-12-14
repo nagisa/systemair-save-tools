@@ -52,15 +52,9 @@ impl Args {
                 Formatter::Table { comfy }
             }
             Format::Jsonl => Formatter::Jsonl,
-            Format::Csv => Formatter::Csv {
-                written_records: false,
-            },
+            Format::Csv => Formatter::Csv { written_records: false },
         };
-        Ok(Output {
-            args: self,
-            io,
-            formatter,
-        })
+        Ok(Output { args: self, io, formatter })
     }
 }
 
@@ -107,22 +101,16 @@ impl Output {
                 panic!("something wrong with csv output");
             };
             assert_eq!(value.len(), ib);
-            self.io
-                .write_all(&output[..ob])
-                .map_err(|e| self.write_error(e))?;
+            self.io.write_all(&output[..ob]).map_err(|e| self.write_error(e))?;
             let (WriteResult::InputEmpty, ob) = writer.delimiter(&mut output) else {
                 panic!("something wrong with csv output");
             };
-            self.io
-                .write_all(&output[..ob])
-                .map_err(|e| self.write_error(e))?;
+            self.io.write_all(&output[..ob]).map_err(|e| self.write_error(e))?;
         }
         let (WriteResult::InputEmpty, ob) = writer.terminator(&mut output) else {
             panic!("something wrong with csv output");
         };
-        self.io
-            .write_all(&output[..ob])
-            .map_err(|e| self.write_error(e))
+        self.io.write_all(&output[..ob]).map_err(|e| self.write_error(e))
     }
 
     pub fn result<R: serde::Serialize>(
@@ -159,9 +147,7 @@ impl Output {
         match &self.formatter {
             Formatter::Csv { written_records: _ } => {}
             Formatter::Table { comfy } => {
-                self.io
-                    .write_fmt(format_args!("{}", comfy))
-                    .map_err(|e| self.write_error(e))?;
+                self.io.write_fmt(format_args!("{}", comfy)).map_err(|e| self.write_error(e))?;
             }
             Formatter::Jsonl => {}
         }

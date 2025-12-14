@@ -47,11 +47,7 @@ impl Node for ClockNode {
             .iter()
             .map(|prop| (prop.prop_id.clone(), prop.description()))
             .collect::<BTreeMap<_, _>>();
-        HomieNodeDescription {
-            name: Some("time and date".to_string()),
-            r#type: None,
-            properties,
-        }
+        HomieNodeDescription { name: Some("time and date".to_string()), r#type: None, properties }
     }
 
     fn properties(&self) -> &'static [PropertyEntry] {
@@ -141,9 +137,7 @@ impl AggregatePropertyValue for ClockValue {
 }
 impl PropertyDescription for ClockValue {
     fn description(_: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
-        PropertyDescriptionBuilder::new(HomieDataType::Datetime)
-            .settable(true)
-            .build()
+        PropertyDescriptionBuilder::new(HomieDataType::Datetime).settable(true).build()
     }
 }
 impl TryFrom<&str> for ClockValue {
