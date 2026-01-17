@@ -34,6 +34,8 @@ pub enum Error {
     Flush(#[source] std::io::Error),
 }
 
+const MAX_WAIT_DURATION: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[derive(Default)]
 pub struct ResponseTracker {
     responses: Mutex<BTreeMap<u16, Option<modbus::Response>>>,
@@ -56,8 +58,19 @@ impl ResponseTracker {
     }
 
     pub async fn wait_for(&self, transaction_id: u16) -> Option<modbus::Response> {
+        let mut deadline = std::pin::pin!(tokio::time::sleep(MAX_WAIT_DURATION));
         loop {
-            self.change_notify.notified().await;
+            tokio::select! {
+                _ = &mut deadline => {
+                    tracing::warn!(
+                        ?transaction_id,
+                        "neither response nor timeout arrived within reasonable time; \
+                         this is an implementation bug, timing out the request"
+                    );
+                    return None;
+                },
+                _ = self.change_notify.notified() => {},
+            }
             let mut guard = self.responses.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(v) = guard.remove(&transaction_id) {
                 return v;
