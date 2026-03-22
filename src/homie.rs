@@ -36,6 +36,7 @@ pub(crate) enum EventResult {
     HomieNotSet { node_id: HomieID, prop_idx: usize, why: &'static str },
     HomieSet { node_id: HomieID, prop_idx: usize, operation: Operation, response: ResponseKind },
     ActionResponse { node_id: HomieID, prop_idx: usize, value: Box<DynPropertyValue> },
+    ActionFailure { node_id: HomieID, prop_idx: usize, why: &'static str },
 }
 
 #[derive(Debug)]
@@ -621,6 +622,12 @@ impl SystemAirDevice {
             }
             EventResult::ActionResponse { node_id, prop_idx, value } => {
                 self.handle_value_change(&node_id, prop_idx, &*value).await?;
+            }
+            EventResult::ActionFailure { node_id, prop_idx, why } => {
+                let node = self.nodes.get(&node_id);
+                let node = node.ok_or_else(|| Error::UnknownNode(node_id.clone()))?;
+                let prop = &node.properties()[prop_idx];
+                tracing::error!(%node_id, prop_id = %prop.prop_id, why, "action did not succeed");
             }
             EventResult::Periodic { .. } => unreachable!("EventResult::Periodic"),
             EventResult::HomieSet { .. } => unreachable!("EventResult::HomieSet"),
