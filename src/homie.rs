@@ -274,14 +274,17 @@ impl SystemAirDevice {
                             }
                         }
                     }
+                    // Registers that are polled individually don't need to be a part of the
+                    // ranges, but we still want to have their values before going ready.
+                    let mut range_registers = need_registers.clone();
                     for (address, duration) in individual_polls {
-                        need_registers.clear(address);
+                        range_registers.clear(address);
                         self.schedule_periodic_read(address, 1, duration);
                     }
 
                     // FIXME: this logic of optimal ranges is at the wrong level of abstraction.
                     // In particular with IAMv2 the limits are likely different.
-                    for range in need_registers.find_optimal_ranges(modbus::MAX_SAFE_READ_COUNT) {
+                    for range in range_registers.find_optimal_ranges(modbus::MAX_SAFE_READ_COUNT) {
                         self.schedule_periodic_read(
                             *range.start(),
                             u16::try_from(range.len()).unwrap(),
@@ -446,7 +449,7 @@ impl SystemAirDevice {
             let new = prop.kind.value_from_modbus(&self.modbus_values);
             let (mut value_changed, mut target_changed, new) = match (old, new) {
                 (None, None) => (false, false, None),
-                (Some(_), None) => panic!("erasing values is not inteded to be possible"),
+                (Some(_), None) => panic!("erasing values is not intended to be possible"),
                 (_, Some(Err(error))) => {
                     tracing::debug!(
                         %node_id,

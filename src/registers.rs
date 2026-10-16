@@ -298,7 +298,7 @@ macro_rules! for_each_register {
             1178: U16, RW, "PRESSURE_GUARD_AIRFLOW_LEVEL_EAF", min = 0, max = 5;
             1181: U16, RW, "USERMODE_HOLIDAY_DI_OFF_DELAY", min = 0, max = 365;
             1182: U16, RW, "USERMODE_AWAY_DI_OFF_DELAY", min = 0, max = 72;
-            1183: U16, RW, "USERMODE_FIRPLACE_DI_OFF_DELAY", min = 0, max = 60;
+            1183: U16, RW, "USERMODE_FIREPLACE_DI_OFF_DELAY", min = 0, max = 60;
             1184: U16, RW, "USERMODE_REFRESH_DI_OFF_DELAY", min = 0, max = 240;
             1185: U16, RW, "USERMODE_CROWDED_DI_OFF_DELAY", min = 0, max = 8;
             1188: U16, RW, "CDI1_OFF_DELAY", min = 0, max = 240;

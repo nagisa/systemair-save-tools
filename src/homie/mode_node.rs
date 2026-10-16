@@ -24,7 +24,7 @@ super::node::properties! { static PROPERTIES = [
     { "away-duration": UintValue = register "USERMODE_AWAY_TIME" },
     { "away-digital-input-off-delay": UintValue = register "USERMODE_AWAY_DI_OFF_DELAY" },
     { "fireplace-duration": UintValue = register "USERMODE_FIREPLACE_TIME" },
-    { "fireplace-digital-input-off-delay": UintValue = register "USERMODE_FIRPLACE_DI_OFF_DELAY" },
+    { "fireplace-digital-input-off-delay": UintValue = register "USERMODE_FIREPLACE_DI_OFF_DELAY" },
     { "refresh-duration": UintValue = register "USERMODE_REFRESH_TIME" }, // minutes
     { "refresh-digital-input-off-delay": UintValue = register "USERMODE_REFRESH_DI_OFF_DELAY" },
     { "crowded-duration": UintValue = register "USERMODE_CROWDED_TIME" },
@@ -35,13 +35,13 @@ super::node::properties! { static PROPERTIES = [
     { "remaining-duration": RemainingTimeValue = aggregate
         "USERMODE_REMAINING_TIME_L", "USERMODE_REMAINING_TIME_H"
     },
-    { "ditigal-input-1-remaining-duration": RemainingTimeValue = aggregate
+    { "digital-input-1-remaining-duration": RemainingTimeValue = aggregate
         "USERMODE_REMAINING_TIME_CDI1_L", "USERMODE_REMAINING_TIME_CDI1_H"
     },
-    { "ditigal-input-2-remaining-duration": RemainingTimeValue = aggregate
+    { "digital-input-2-remaining-duration": RemainingTimeValue = aggregate
         "USERMODE_REMAINING_TIME_CDI2_L", "USERMODE_REMAINING_TIME_CDI2_H"
     },
-    { "ditigal-input-3-remaining-duration": RemainingTimeValue = aggregate
+    { "digital-input-3-remaining-duration": RemainingTimeValue = aggregate
         "USERMODE_REMAINING_TIME_CDI3_L", "USERMODE_REMAINING_TIME_CDI3_H"
     },
     { "digital-input-1-active": BooleanValue = register "FUNCTION_ACTIVE_CDI_1" },
@@ -151,6 +151,7 @@ impl AggregatePropertyValue for CurrentMode {
                         operation,
                         response: response.kind,
                     });
+                    return;
                 }
                 // Device takes a little bit of extra time to figure things out.
                 //

@@ -1,6 +1,7 @@
 use crate::registers::{RegisterIndex, Value};
 
-pub(crate) struct RegisterBitmask([u64; u16::MAX as usize / u64::BITS as usize]);
+#[derive(Clone)]
+pub(crate) struct RegisterBitmask([u64; (u16::MAX as usize + 1) / u64::BITS as usize]);
 
 impl RegisterBitmask {
     pub(crate) fn new() -> Self {
@@ -120,7 +121,7 @@ impl<'a> Iterator for SetBitsIterator<'a> {
 }
 
 pub(crate) struct ModbusDeviceValues {
-    values: [u16; u16::MAX as usize],
+    values: [u16; u16::MAX as usize + 1],
     have_value: RegisterBitmask,
 }
 
