@@ -7,9 +7,9 @@ use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::error::SendError;
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio_util::codec::Framed;
 use tracing::{debug, info, trace, warn};
@@ -24,6 +24,13 @@ pub enum Error {
     OpenDevice(#[source] std::io::Error, PathBuf),
     #[error("scheduling a request failed")]
     ScheduleRequest(#[source] SendError<modbus::Request>),
+    /// The reason the worker has stopped is shared between everything that was waiting on it.
+    #[error("the connection worker has stopped")]
+    WorkerStopped(#[source] Arc<Error>),
+    #[error("the connection worker task did not complete")]
+    WorkerTask(#[source] tokio::task::JoinError),
+    #[error("the connection was shut down")]
+    ConnectionClosed,
     #[error("could not read data from the stream")]
     Receive(#[source] std::io::Error),
     #[error("could not shut down the connection")]
@@ -35,47 +42,101 @@ pub enum Error {
 }
 
 const MAX_WAIT_DURATION: std::time::Duration = std::time::Duration::from_secs(15);
+/// The minimum amount of time between the starts of two subsequent connection attempts.
+const RECONNECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// Keeps track of the requests that are waiting for their response.
+///
+/// Every request gets a [`oneshot`] channel which the connection worker uses to hand over the
+/// response (or a timeout). This way a response is never lost, regardless of whether it arrives
+/// before or after the requester gets around to polling, and only the interested party is woken up.
 #[derive(Default)]
 pub struct ResponseTracker {
-    responses: Mutex<BTreeMap<u16, Option<modbus::Response>>>,
-    change_notify: Notify,
+    state: Mutex<TrackerState>,
+}
+
+#[derive(Default)]
+struct TrackerState {
+    waiters: BTreeMap<u16, oneshot::Sender<Option<modbus::Response>>>,
+    failure: Option<Arc<Error>>,
 }
 
 impl ResponseTracker {
+    fn lock(&self) -> std::sync::MutexGuard<'_, TrackerState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Start waiting for a response to the request with the specified transaction ID.
+    ///
+    /// This must be called before the request is sent out.
+    fn register(&self, transaction_id: u16) -> Result<Waiter<'_>, Error> {
+        let mut state = self.lock();
+        if let Some(reason) = &state.failure {
+            return Err(Error::WorkerStopped(Arc::clone(reason)));
+        }
+        let (sender, receiver) = oneshot::channel();
+        let previous = state.waiters.insert(transaction_id, sender);
+        debug_assert!(previous.is_none(), "transaction ID {transaction_id} is already in use");
+        Ok(Waiter { tracker: self, transaction_id, receiver })
+    }
+
     pub fn mark_timeout(&self, transaction_id: u16) {
-        let mut guard = self.responses.lock().unwrap_or_else(|e| e.into_inner());
-        guard.insert(transaction_id, None);
-        self.change_notify.notify_waiters();
-        drop(guard);
+        let sender = self.lock().waiters.remove(&transaction_id);
+        if let Some(sender) = sender {
+            let _ = sender.send(None);
+        }
     }
 
     pub fn add_response(&self, response: modbus::Response) {
-        let mut guard = self.responses.lock().unwrap_or_else(|e| e.into_inner());
-        guard.insert(response.transaction_id, Some(response));
-        self.change_notify.notify_waiters();
-        drop(guard);
+        let sender = self.lock().waiters.remove(&response.transaction_id);
+        if let Some(sender) = sender {
+            let _ = sender.send(Some(response));
+        }
     }
 
-    pub async fn wait_for(&self, transaction_id: u16) -> Option<modbus::Response> {
-        let mut deadline = std::pin::pin!(tokio::time::sleep(MAX_WAIT_DURATION));
-        loop {
-            tokio::select! {
-                _ = &mut deadline => {
-                    tracing::warn!(
-                        ?transaction_id,
-                        "neither response nor timeout arrived within reasonable time; \
-                         this is an implementation bug, timing out the request"
-                    );
-                    return None;
-                },
-                _ = self.change_notify.notified() => {},
-            }
-            let mut guard = self.responses.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(v) = guard.remove(&transaction_id) {
-                return v;
+    /// Record that the worker has stopped and fail everything waiting on it.
+    fn fail(&self, reason: Arc<Error>) {
+        let mut state = self.lock();
+        state.failure.get_or_insert(reason);
+        // Dropping the senders wakes all the waiters up.
+        let waiters = std::mem::take(&mut state.waiters);
+        drop(state);
+        drop(waiters);
+    }
+
+    fn failure(&self) -> Option<Error> {
+        self.lock().failure.as_ref().map(|reason| Error::WorkerStopped(Arc::clone(reason)))
+    }
+}
+
+/// A registered interest in a response. Stops being tracked when dropped.
+struct Waiter<'a> {
+    tracker: &'a ResponseTracker,
+    transaction_id: u16,
+    receiver: oneshot::Receiver<Option<modbus::Response>>,
+}
+
+impl Waiter<'_> {
+    async fn wait(&mut self) -> Result<Option<modbus::Response>, Error> {
+        match tokio::time::timeout(MAX_WAIT_DURATION, &mut self.receiver).await {
+            Ok(Ok(response)) => Ok(response),
+            // Senders are only ever dropped without sending by `ResponseTracker::fail`.
+            Ok(Err(_)) => Err(self.tracker.failure().unwrap_or(Error::ConnectionClosed)),
+            Err(_) => {
+                tracing::warn!(
+                    transaction_id = self.transaction_id,
+                    "neither response nor timeout arrived within reasonable time; \
+                     this is an implementation bug, timing out the request"
+                );
+                Ok(None)
             }
         }
+    }
+}
+
+impl Drop for Waiter<'_> {
+    fn drop(&mut self) {
+        self.tracker.lock().waiters.remove(&self.transaction_id);
     }
 }
 
@@ -194,8 +255,11 @@ impl Connection {
         let transaction_id = self.new_transaction_id();
         let request =
             modbus::Request { device_id: self.args.how.device_id, transaction_id, operation };
-        self.request_queue.send(request).map_err(Error::ScheduleRequest)?;
-        Ok(self.response_tracker.wait_for(transaction_id).await)
+        let mut waiter = self.response_tracker.register(transaction_id)?;
+        self.request_queue.send(request).map_err(|e| {
+            self.response_tracker.failure().unwrap_or(Error::ScheduleRequest(e))
+        })?;
+        waiter.wait().await
     }
 
     /// [`Self::send`] but retries timeouts and `Server Busy` exceptions.
@@ -263,7 +327,31 @@ impl TcpWorker {
         self,
         jobs: UnboundedReceiver<modbus::Request>,
     ) -> tokio::task::JoinHandle<Result<(), Error>> {
-        tokio::task::spawn(self.main_loop(jobs))
+        let responses = Arc::clone(&self.responses);
+        // The worker runs in its own task so that panics are observed too.
+        let worker = tokio::task::spawn(self.main_loop(jobs));
+        tokio::task::spawn(async move {
+            let result = match worker.await {
+                Ok(result) => result,
+                Err(join_error) => Err(Error::WorkerTask(join_error)),
+            };
+            // Whatever the reason, nothing is going to answer the outstanding requests anymore.
+            match result {
+                Ok(()) => {
+                    responses.fail(Arc::new(Error::ConnectionClosed));
+                    Ok(())
+                }
+                Err(e) => {
+                    let e = Arc::new(e);
+                    tracing::error!(
+                        message = "connection worker stopped",
+                        error = (&*e as &dyn std::error::Error)
+                    );
+                    responses.fail(Arc::clone(&e));
+                    Err(Error::WorkerStopped(e))
+                }
+            }
+        })
     }
 
     async fn main_loop(
@@ -271,6 +359,11 @@ impl TcpWorker {
         mut jobs: UnboundedReceiver<modbus::Request>,
     ) -> Result<(), Error> {
         let mut pending_send: Option<modbus::Request> = None;
+        let mut connected_before = false;
+        // The first tick completes immediately. With `Delay` a late tick (long-lived connection)
+        // schedules the next one a full interval from now, rather than catching up with a burst.
+        let mut reconnect_interval = tokio::time::interval(RECONNECT_INTERVAL);
+        reconnect_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         'reconnect: loop {
             // If we are reconnecting and had any in-flight requests, it is only proper to report
             // them as timed out.
@@ -280,9 +373,27 @@ impl TcpWorker {
             if let Some(req) = pending_send.take() {
                 self.responses.mark_timeout(req.transaction_id);
             }
+            // Connection attempts can fail instantly (e.g. connection refused) and connections can
+            // get closed right after they were established. Make sure we're not spinning.
+            reconnect_interval.tick().await;
             // FIXME: shouldn't await here, these should be part of select!
             // somehow.
-            let (mut io_sink, mut io_source) = self.connect().await?.split();
+            let io = match self.connect().await {
+                Ok(io) => io,
+                // Failing to establish the very first connection is most likely a configuration
+                // problem and is reported right away. Later on the device may well be rebooting
+                // or the network may be having a moment, so keep trying.
+                Err(e) if connected_before => {
+                    warn!(
+                        message = "could not reconnect, will retry",
+                        error = (&e as &dyn std::error::Error)
+                    );
+                    continue 'reconnect;
+                }
+                Err(e) => return Err(e),
+            };
+            connected_before = true;
+            let (mut io_sink, mut io_source) = io.split();
             let mut send_time = pin::pin!(tokio::time::sleep_until(Instant::now()));
             let mut recv_time = pin::pin!(tokio::time::sleep_until(Instant::now()));
             loop {
@@ -295,8 +406,20 @@ impl TcpWorker {
                             continue 'reconnect;
                         };
                         match response {
-                            Err(e) => return Err(Error::Receive(e)),
+                            Err(e) => {
+                                warn!(
+                                    message = "receiving a response failed, will reconnect",
+                                    error = (&e as &dyn std::error::Error)
+                                );
+                                continue 'reconnect;
+                            }
                             Ok(response) => self.handle_response(response),
+                        }
+                        // The request at the front of the queue may have changed; make sure the
+                        // timeout tracks the new front rather than one that has already been
+                        // answered (or dropped).
+                        if let Some((_, deadline)) = self.inflight.front() {
+                            recv_time.as_mut().reset(*deadline);
                         }
                         // If no other requests are in-flight, then IAM is idle and we can send a
                         // request to it right away.
@@ -355,7 +478,14 @@ impl TcpWorker {
                             Some(req) => {
                                 // While we're sending, use `send_time` to track send timeout.
                                 send_time.as_mut().reset(Instant::now() + *self.args.send_timeout);
-                                io_sink.feed(req.clone()).await.map_err(Error::Send)?;
+                                if let Err(e) = io_sink.feed(req.clone()).await {
+                                    warn!(
+                                        message = "queueing a request failed, will reconnect",
+                                        error = (&e as &dyn std::error::Error)
+                                    );
+                                    self.responses.mark_timeout(req.transaction_id);
+                                    continue 'reconnect;
+                                }
                                 assert!(pending_send.replace(req).is_none());
                             }
                         }
@@ -418,11 +548,10 @@ impl TcpWorker {
             reconnect_countdown = self.reconnect_countdown
         );
         self.responses.mark_timeout(transaction_id);
-        if let Some(new_count) = self.reconnect_countdown.checked_sub(1) {
-            self.reconnect_countdown = new_count;
-        } else {
+        self.reconnect_countdown = self.reconnect_countdown.saturating_sub(1);
+        if self.reconnect_countdown == 0 {
             return false;
-        };
+        }
         if let Some((_, timeout)) = self.inflight.front() {
             request_timeout.reset(*timeout);
         }

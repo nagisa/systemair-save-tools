@@ -136,6 +136,7 @@ impl Decoder for ModbusTCPCodec {
                 return Ok(None);
             };
             let required_length = u16::from_be_bytes(*length_buffer);
+            let frame_length = usize::from(required_length) + 6;
             let Some((data, _)) = remainder.split_at_checked(required_length.into()) else {
                 return Ok(None);
             };
@@ -160,26 +161,32 @@ impl Decoder for ModbusTCPCodec {
                 //
                 // This is just one of the ways in which SystemAIR Modbus implementation is special
                 // such that using off-shelf parsers doesn't work well.
-                let result = Ok(Some(Response {
-                    transaction_id,
-                    device_id,
-                    kind: match function_code {
-                        3 => {
-                            let [_, _, _, values @ ..] = data else { unreachable!() };
-                            ResponseKind::GetHoldings { values: values.to_vec() }
+                let kind = match function_code {
+                    3 => {
+                        let [_, _, _, values @ ..] = data else { unreachable!() };
+                        ResponseKind::GetHoldings { values: values.to_vec() }
+                    }
+                    16 => {
+                        let [_, _, a1, a2, w1, w2] = data else {
+                            // Not something we understand. Don't trust the header's length;
+                            // consume as little as possible and resynchronize.
+                            src.advance(1);
+                            continue;
+                        };
+                        ResponseKind::SetHoldings {
+                            address: u16::from_be_bytes([*a1, *a2]),
+                            words: u16::from_be_bytes([*w1, *w2]),
                         }
-                        16 => {
-                            let [_, _, a1, a2, w1, w2] = data else { unreachable!() };
-                            ResponseKind::SetHoldings {
-                                address: u16::from_be_bytes([*a1, *a2]),
-                                words: u16::from_be_bytes([*w1, *w2]),
-                            }
-                        }
-                        _ => continue,
-                    },
-                }));
-                src.advance(usize::from(required_length) + 6);
-                return result;
+                    }
+                    _ => {
+                        // Unknown function; Advance one byte so that we resynchronize as soon as
+                        // possible instead of decoding the same bytes forever.
+                        src.advance(1);
+                        continue;
+                    }
+                };
+                src.advance(frame_length);
+                return Ok(Some(Response { transaction_id, device_id, kind }));
             }
         }
     }

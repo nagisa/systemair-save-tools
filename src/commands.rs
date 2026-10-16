@@ -153,7 +153,7 @@ pub mod read {
     pub enum Error {
         #[error("could not create an asynchronous execution runtime")]
         CreateAsyncRuntime(#[source] std::io::Error),
-        #[error("could establish client connection with the device")]
+        #[error("could not establish client connection with the device")]
         EstablishClient(#[source] crate::connection::Error),
         #[error("register range start `{1}` could not be parsed")]
         RegisterRangeStartParse(#[source] ParseIntError, String),
@@ -163,6 +163,10 @@ pub mod read {
         RegisterRangeEmpty(u16, u16),
         #[error("register `{0}` does not match any known register")]
         RegisterNotFound(String),
+        #[error("register addresses start at 1, but address 0 was specified")]
+        RegisterAddressZero,
+        #[error("response for register {0} is too short (expected {1} bytes, got {2})")]
+        ResponseTooShort(u16, usize, usize),
         #[error("communication with the device failed")]
         Communicate(#[source] crate::connection::Error),
         #[error(transparent)]
@@ -223,6 +227,9 @@ pub mod read {
             .iter()
             .map(|register| {
                 if let Ok(address) = register.parse::<u16>() {
+                    if address == 0 {
+                        return Err(Error::RegisterAddressZero);
+                    }
                     let index = RegisterIndex::from_address(address);
                     return Ok(ReadRequest::SingleRegister { address, index });
                 }
@@ -230,6 +237,9 @@ pub mod read {
                     let address_start = l
                         .parse::<u16>()
                         .map_err(|e| Error::RegisterRangeStartParse(e, l.to_string()))?;
+                    if address_start == 0 {
+                        return Err(Error::RegisterAddressZero);
+                    }
                     let address_end = r
                         .parse::<u16>()
                         .map_err(|e| Error::RegisterRangeEndParse(e, r.to_string()))?;
@@ -276,6 +286,16 @@ pub mod read {
                     })
                     .collect(),
             };
+            // The device can respond with fewer registers than were asked for.
+            if let ResponseKind::GetHoldings { values } = &response.kind {
+                for &(address, register_index, value_offset) in &responses {
+                    let dt = register_index.map_or(DataType::U16, |r| r.data_type());
+                    let expected = value_offset + dt.bytes();
+                    if values.len() < expected {
+                        return Err(Error::ResponseTooShort(address, expected, values.len()));
+                    }
+                }
+            }
             for (address, register_index, value_offset) in responses {
                 output
                     .result(
@@ -535,34 +555,48 @@ pub mod mqtt {
                 }
             }
         }
-        loop {
-            let mqtt_event = tokio::select! {
-                biased;
-                result = client_loop.poll() => result.map_err(Error::MqttConnection)?,
-                result = device.step() => {
-                    result.map_err(Error::DeviceStep)?;
-                    continue;
-                }
-            };
-            match mqtt_event {
-                rumqttc::v5::Event::Incoming(Incoming::Publish(msg)) => {
-                    match Command::try_from_mqtt_command(msg) {
-                        Ok(cmd) => {
-                            let Ok(()) = command_tx.send(cmd) else {
-                                tracing::warn!("command channel gone, terminating");
-                                break;
-                            };
-                        }
-                        Err(unexpected) => {
-                            tracing::warn!(?unexpected, "unexpected mqtt command received")
+        'step: loop {
+            // SUBTLE: `step` is not cancellation safe -- it may have taken an event off the event
+            // stream and be in the middle of publishing the resulting changes (which can block on
+            // the MQTT request queue being full, and that queue is only drained by
+            // `client_loop.poll()`.) Dropping it would lose the event. So the same future is kept
+            // and polled across MQTT events until it completes.
+            let mut step = std::pin::pin!(device.step());
+            let step_result = loop {
+                let mqtt_event = tokio::select! {
+                    biased;
+                    result = client_loop.poll() => result.map_err(Error::MqttConnection)?,
+                    result = &mut step => break result,
+                };
+                match mqtt_event {
+                    rumqttc::v5::Event::Incoming(Incoming::Publish(msg)) => {
+                        match Command::try_from_mqtt_command(msg) {
+                            Ok(cmd) => {
+                                let Ok(()) = command_tx.send(cmd) else {
+                                    tracing::warn!("command channel gone, terminating");
+                                    break 'step;
+                                };
+                            }
+                            Err(unexpected) => {
+                                tracing::warn!(?unexpected, "unexpected mqtt command received")
+                            }
                         }
                     }
+                    rumqttc::v5::Event::Incoming(
+                        Incoming::PubAck(_)
+                        | Incoming::PubRec(_)
+                        | Incoming::PubRel(_)
+                        | Incoming::PubComp(_)
+                        | Incoming::SubAck(_)
+                        | Incoming::PingResp(_),
+                    ) => {}
+                    rumqttc::v5::Event::Incoming(event) => {
+                        tracing::debug!(?event, "incoming mqtt event not handled");
+                    }
+                    rumqttc::v5::Event::Outgoing(_) => {}
                 }
-                rumqttc::v5::Event::Incoming(event) => {
-                    tracing::debug!(?event, "incoming mqtt event not handled");
-                }
-                rumqttc::v5::Event::Outgoing(_) => {}
-            }
+            };
+            step_result.map_err(Error::DeviceStep)?;
         }
         Ok(())
     }
