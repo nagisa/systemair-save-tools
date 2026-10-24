@@ -72,7 +72,8 @@ impl TryFrom<&str> for ReplacementPeriod {
     type Error = jiff::Error;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let duration = value.parse::<jiff::Span>()?;
-        let months = duration.total(jiff::Unit::Month)?;
+        let now = jiff::Zoned::now();
+        let months = duration.total((jiff::Unit::Month, &now))?;
         if !(3.0..=15.0).contains(&months) {
             return Err(jiff::Error::from_args(format_args!(
                 "filter replacement period out of range"
