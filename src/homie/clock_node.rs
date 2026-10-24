@@ -141,9 +141,12 @@ impl PropertyDescription for ClockValue {
     }
 }
 impl TryFrom<&str> for ClockValue {
-    type Error = ();
-    fn try_from(_: &str) -> Result<Self, Self::Error> {
-        unimplemented!("although clock is settable separately, this has not been implemented yet")
+    type Error = jiff::Error;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if let Ok(ts) = value.parse::<jiff::Timestamp>() {
+            return Ok(Self(ts.to_zoned(jiff::tz::TimeZone::system()).datetime()));
+        }
+        Ok(Self(value.parse()?))
     }
 }
 

@@ -256,9 +256,9 @@ impl Connection {
         let request =
             modbus::Request { device_id: self.args.how.device_id, transaction_id, operation };
         let mut waiter = self.response_tracker.register(transaction_id)?;
-        self.request_queue.send(request).map_err(|e| {
-            self.response_tracker.failure().unwrap_or(Error::ScheduleRequest(e))
-        })?;
+        self.request_queue
+            .send(request)
+            .map_err(|e| self.response_tracker.failure().unwrap_or(Error::ScheduleRequest(e)))?;
         waiter.wait().await
     }
 
