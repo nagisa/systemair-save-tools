@@ -1299,7 +1299,7 @@ dependencies = [
 
 [[package]]
 name = "systemair-save-tools"
-version = "1.9.0"
+version = "1.10.0"
 dependencies = [
  "async-stream",
  "clap",
@@ -1321,6 +1321,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "tracing-journald",
  "tracing-subscriber",
 ]
 
@@ -1479,6 +1480,17 @@ checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
 dependencies = [
  "once_cell",
  "valuable",
+]
+
+[[package]]
+name = "tracing-journald"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d3a81ed245bfb62592b1e2bc153e77656d94ee6a0497683a65a12ccaf2438d0"
+dependencies = [
+ "libc",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+use crate::Chain;
 use crate::modbus::{self, ModbusTCPCodec, Request};
 use futures::{SinkExt, StreamExt as _};
 use std::collections::{BTreeMap, VecDeque};
@@ -345,7 +346,7 @@ impl TcpWorker {
                     let e = Arc::new(e);
                     tracing::error!(
                         message = "connection worker stopped",
-                        error = (&*e as &dyn std::error::Error)
+                        error = %Chain(&*e)
                     );
                     responses.fail(Arc::clone(&e));
                     Err(Error::WorkerStopped(e))
@@ -386,7 +387,7 @@ impl TcpWorker {
                 Err(e) if connected_before => {
                     warn!(
                         message = "could not reconnect, will retry",
-                        error = (&e as &dyn std::error::Error)
+                        error = %Chain(&e)
                     );
                     continue 'reconnect;
                 }
@@ -409,7 +410,7 @@ impl TcpWorker {
                             Err(e) => {
                                 warn!(
                                     message = "receiving a response failed, will reconnect",
-                                    error = (&e as &dyn std::error::Error)
+                                    error = %Chain(&e)
                                 );
                                 continue 'reconnect;
                             }
@@ -431,7 +432,7 @@ impl TcpWorker {
                         if let Err(e) = send_result {
                             warn!(
                                 message="sending request failed, will reconnect",
-                                error=(&e as &dyn std::error::Error)
+                                error=%Chain(&e)
                             );
                             continue 'reconnect;
                         }
@@ -481,7 +482,7 @@ impl TcpWorker {
                                 if let Err(e) = io_sink.feed(req.clone()).await {
                                     warn!(
                                         message = "queueing a request failed, will reconnect",
-                                        error = (&e as &dyn std::error::Error)
+                                        error = %Chain(&e)
                                     );
                                     self.responses.mark_timeout(req.transaction_id);
                                     continue 'reconnect;

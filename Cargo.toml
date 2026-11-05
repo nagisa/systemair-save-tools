@@ -1,6 +1,6 @@
 [package]
 name = "systemair-save-tools"
-version = "1.9.0"
+version = "1.10.0"
 edition = "2024"
 license = "MIT"
 authors = ["Simonas Kazlauskas <systemair@kazlauskas.me>"]
@@ -21,6 +21,7 @@ thiserror = "2.0.3"
 tokio-util = { version = "0.7.12", features = ["codec", "rt", "time"] }
 tokio = { version = "1.41.1", features = ["fs"] }
 tracing = "0.1.41"
+tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.19" }
 homie5 = { version = "0.8.0" }
 strum = { version = "0.26.3", features = ["derive"] }
