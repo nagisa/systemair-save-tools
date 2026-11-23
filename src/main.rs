@@ -32,8 +32,14 @@ fn end<E: std::error::Error>(r: Result<(), E>, to_journal: bool) {
     });
 }
 
+#[cfg(not(unix))]
+fn journald() -> Option<tracing_journald::Layer> {
+    None
+}
+
 /// The journald layer, if stderr is the journal stream systemd connected. Logging through it gives
 /// the lines their real priorities and their fields as journal fields.
+#[cfg(unix)]
 fn journald() -> Option<tracing_journald::Layer> {
     use std::os::{fd::AsFd as _, unix::fs::MetadataExt as _};
     // Children inherit `JOURNAL_STREAM`, so it only counts if it is stderr's device and inode.
