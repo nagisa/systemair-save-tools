@@ -1,5 +1,5 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::string_enum;
+use crate::homie::value::{CelsiusValue, string_enum};
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
@@ -9,6 +9,20 @@ super::node::properties! { static PROPERTIES = [
     { "digital-input-2-connection": DigitalInputConnection = register "DI_CONNECTION_2" },
     { "digital-input-1-polarity": DigitalInputPolarity = register "DI_CFG_POLARITY_1" },
     { "digital-input-2-polarity": DigitalInputPolarity = register "DI_CFG_POLARITY_2" },
+    { "analog-input-1-function": AnalogInputFunction = register "AI_1_FUNCTION" },
+    { "analog-input-2-function": AnalogInputFunction = register "AI_2_FUNCTION" },
+    { "analog-input-3-function": AnalogInputFunction = register "AI_3_FUNCTION" },
+    { "analog-input-4-function": AnalogInputFunction = register "AI_4_FUNCTION" },
+    { "analog-input-5-function": AnalogInputFunction = register "AI_5_FUNCTION" },
+    { "analog-input-6-function": AnalogInputFunction = register "AI_6_FUNCTION" },
+    { "analog-input-7-function": AnalogInputFunction = register "AI_7_FUNCTION" },
+    { "analog-input-1-correction": CelsiusValue = register "AI_1_CORRECTION" },
+    { "analog-input-2-correction": CelsiusValue = register "AI_2_CORRECTION" },
+    { "analog-input-3-correction": CelsiusValue = register "AI_3_CORRECTION" },
+    { "analog-input-4-correction": CelsiusValue = register "AI_4_CORRECTION" },
+    { "analog-input-5-correction": CelsiusValue = register "AI_5_CORRECTION" },
+    { "analog-input-6-correction": CelsiusValue = register "AI_6_CORRECTION" },
+    { "analog-input-7-correction": CelsiusValue = register "AI_7_CORRECTION" },
 ] }
 
 pub struct InputNode {}
@@ -73,5 +87,22 @@ string_enum! {
     enum DigitalInputPolarity {
         NormallyOpen = 0,
         NormallyClosed = 1,
+    }
+}
+
+string_enum! {
+    #[impl(TryFromValue, PropertyDescription, PropertyValue, RegisterPropertyValue)]
+    #[derive(Clone, Copy)]
+    #[repr(u16)]
+    enum AnalogInputFunction {
+        None = 0,
+        OutdoorAirTemperature = 1,
+        SupplyAirTemperature = 2,
+        OverheatTemperature = 3,
+        FrostProtectionTemperature = 4,
+        RoomAirTemperature = 5,
+        ExtractAirTemperature = 6,
+        ExtraControllerTemperature = 7,
+        EfficiencyTemperature = 8,
     }
 }

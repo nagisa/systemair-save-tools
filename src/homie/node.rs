@@ -125,12 +125,16 @@ where
             Value::I16(v) => i64::from(v),
             Value::Celsius(v) => i64::from(v),
             Value::SpecificHumidity(v) => i64::from(v),
+            Value::Tenths(v) => i64::from(v),
+            Value::Thousandths(v) => i64::from(v),
         });
         let max = register.maximum_value().map(|v| match v {
             Value::U16(v) => i64::from(v),
             Value::I16(v) => i64::from(v),
             Value::Celsius(v) => i64::from(v),
             Value::SpecificHumidity(v) => i64::from(v),
+            Value::Tenths(v) => i64::from(v),
+            Value::Thousandths(v) => i64::from(v),
         });
         'no_format: {
             description.format = match (description.datatype, min, max) {
@@ -296,6 +300,13 @@ macro_rules! properties {
                 register: $crate::registers::RegisterIndex::from_name($name).unwrap(),
                 _phantom: std::marker::PhantomData
             }
+        }
+    };
+    (@property $prop_id:literal: $value_type:ty = kind $kind:expr) => {
+        PropertyEntry {
+            prop_id: HomieID::new_const($prop_id),
+            mk_description: <$value_type as $crate::homie::value::PropertyDescription>::description,
+            kind: $kind,
         }
     };
     (@property $prop_id:literal: $value_type:ty = action) => {

@@ -5,7 +5,7 @@
 //!
 //! Everything else is bog-standard boolean/integer parameters.
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{BooleanValue, UintValue, string_enum, unit};
+use crate::homie::value::{BooleanValue, RemainingTimeValue, UintValue, string_enum, unit};
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
@@ -23,7 +23,11 @@ super::node::properties! { static PROPERTIES = [
     { "rh-summer-setpoint": UintValue<unit::Percent> = register "DEMC_RH_SETTINGS_SP_SUMMER" },
     { "rh-winter-setpoint": UintValue<unit::Percent> = register "DEMC_RH_SETTINGS_SP_WINTER" },
     { "rh-enabled": BooleanValue = register "DEMC_RH_SETTINGS_ON_OFF" },
-    { "season": Season = register "SUMMER_WINTER" },
+    { "season": Season = register "SUMMER_WINTER_STATE" },
+    { "time-until-summer": RemainingTimeValue = aggregate "SUMMER_WINTER_RESTART_COUNTER_L", "SUMMER_WINTER_RESTART_COUNTER_H" },
+    { "active": BooleanValue = register "DEMC_ENABLED" },
+    { "active-controller": ActiveController = register "DEMC_ACTIVE_CONTROLLER" },
+    { "auto-mode-source": AutoModeSource = register "DEMC_AUTO_MODE_SOURCE" },
     { "co2-pband": UintValue<unit::Ppm> = register "DEMC_CO2_SETTINGS_PBAND" },
     { "co2-setpoint": UintValue<unit::Ppm> = register "DEMC_CO2_SETTINGS_SP" },
     { "co2-enabled": BooleanValue = register "DEMC_CO2_SETTINGS_ON_OFF" },
@@ -65,6 +69,7 @@ string_enum! {
     enum Season {
         Summer = 0,
         Winter = 1,
+        Identifying = 2,
     }
 }
 
@@ -76,5 +81,27 @@ string_enum! {
         Economic = 0,
         Good = 1,
         Improving = 2,
+    }
+}
+
+string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum ActiveController {
+        Co2 = 0,
+        Rh = 1,
+    }
+}
+
+string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum AutoModeSource {
+        ExternalControl = 0,
+        DemandControl = 1,
+        WeekSchedule = 2,
+        ConfigurationFault = 3,
     }
 }

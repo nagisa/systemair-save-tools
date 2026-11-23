@@ -1,5 +1,5 @@
 use crate::homie::node::{Node, PropertyEntry};
-use crate::homie::value::{CelsiusValue, string_enum};
+use crate::homie::value::{CelsiusValue, UintValue, string_enum};
 use homie5::HomieID;
 use homie5::device_description::HomieNodeDescription;
 use std::collections::BTreeMap;
@@ -10,6 +10,10 @@ super::node::properties! { static PROPERTIES = [
     { "cascade-min-supply-air-setpoint": CelsiusValue = register "TC_CASCADE_SP_MIN" },
     { "cascade-max-supply-air-setpoint": CelsiusValue = register "TC_CASCADE_SP_MAX" },
     { "mode": ControlMode = register "TC_CONTROL_MODE" },
+    { "supply-air-pband": UintValue = register "TC_CONTROL_PBAND" },
+    { "supply-air-itime": UintValue = register "TC_CONTROL_ITIME" },
+    { "cascade-pband": UintValue = register "TC_CASCADE_PBAND" },
+    { "cascade-itime": UintValue = register "TC_CASCADE_ITIME" },
     { "current-extract-air-setpoint": CelsiusValue = register "TC_EAT_RAT_SP" },
     { "current-room-setpoint": CelsiusValue = register "TC_EAT_RAT_SP" },
     { "current-supply-air-setpoint": CelsiusValue = register "TC_SP_SATC" },

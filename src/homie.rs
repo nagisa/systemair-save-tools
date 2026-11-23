@@ -130,7 +130,7 @@ pub struct Args {
     /// Note that registers for these properties are polled individually and therefore this option
     /// is meant to fine-tune a couple registers at most. If you would like more frequent status
     /// updates in general, consider adjusting `--poll-period` setting instead.
-    #[arg(long, value_delimiter = ',', num_args = 0.., default_value = "alarm/any=3s")]
+    #[arg(long, value_delimiter = ',', num_args = 0.., default_value = "alarm/count=3s")]
     poll: Vec<PollConfig>,
 
     /// Specify the nodes to enable.
@@ -161,6 +161,24 @@ pub(crate) struct SystemAirDevice {
     commands: mpsc::UnboundedReceiver<Command>,
 }
 
+fn known_nodes() -> [Box<dyn Node>; 13] {
+    [
+        Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
+        Box::new(clock_node::ClockNode::new()) as Box<dyn Node>,
+        Box::new(compensation_node::CompensationNode::new()) as _,
+        Box::new(cooler_node::CoolerNode::new()) as _,
+        Box::new(demand_control_node::DemandControlNode::new()) as _,
+        Box::new(fan_speed_node::FanSpeedSettingsNode::new()) as _,
+        Box::new(filter_node::FilterNode::new()) as _,
+        Box::new(free_cooling_node::FreeCoolingNode::new()) as _,
+        Box::new(heater_node::HeaterNode::new()) as _,
+        Box::new(heat_exchanger_node::HeatExchangerNode::new()) as _,
+        Box::new(mode_node::ModeNode::new()) as _,
+        Box::new(temperature_controller_node::TemperatureControllerNode::new()) as _,
+        Box::new(input_node::InputNode::new()) as _,
+    ]
+}
+
 impl SystemAirDevice {
     #[expect(clippy::result_large_err)]
     pub(crate) fn new(
@@ -170,21 +188,7 @@ impl SystemAirDevice {
         modbus: Arc<Connection>,
         commands: mpsc::UnboundedReceiver<Command>,
     ) -> Result<Self, Error> {
-        let known_nodes = [
-            Box::new(alarm_node::AlarmNode::new()) as Box<dyn Node>,
-            Box::new(clock_node::ClockNode::new()) as Box<dyn Node>,
-            Box::new(compensation_node::CompensationNode::new()) as _,
-            Box::new(cooler_node::CoolerNode::new()) as _,
-            Box::new(demand_control_node::DemandControlNode::new()) as _,
-            Box::new(fan_speed_node::FanSpeedSettingsNode::new()) as _,
-            Box::new(filter_node::FilterNode::new()) as _,
-            Box::new(free_cooling_node::FreeCoolingNode::new()) as _,
-            Box::new(heater_node::HeaterNode::new()) as _,
-            Box::new(heat_exchanger_node::HeatExchangerNode::new()) as _,
-            Box::new(mode_node::ModeNode::new()) as _,
-            Box::new(temperature_controller_node::TemperatureControllerNode::new()) as _,
-            Box::new(input_node::InputNode::new()) as _,
-        ];
+        let known_nodes = known_nodes();
         let nodes = known_nodes
             .into_iter()
             .map(|v| (v.node_id(), v))
@@ -696,5 +700,40 @@ impl Command {
             }
             _ => Err(msg),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registers::RegisterIndex;
+
+    #[test]
+    fn node_descriptions_build() {
+        for node in known_nodes() {
+            node.description();
+        }
+    }
+
+    #[test]
+    fn active_alarms() {
+        let nodes = known_nodes();
+        let alarm = nodes.iter().find(|n| n.node_id().as_str() == "alarm").unwrap();
+        let active = &alarm.properties()[0];
+        assert_eq!(active.prop_id.as_str(), "active");
+        let mut values = ModbusDeviceValues::new();
+        assert!(active.kind.value_from_modbus(&values).is_none());
+        for register in active.kind.registers() {
+            values.set_value(register.address(), 0);
+        }
+        let value = |values: &ModbusDeviceValues| {
+            active.kind.value_from_modbus(values).unwrap().unwrap().value()
+        };
+        assert_eq!(value(&values), "[]");
+        let address = |name| RegisterIndex::from_name(name).unwrap().address();
+        values.set_value(address("ALARM_RAT_ALARM"), 1);
+        values.set_value(address("ALARM_FILTER_ALARM"), 3);
+        values.set_value(address("ALARM_CO2_ALARM"), 2);
+        assert_eq!(value(&values), r#"["filter","room-air-temperature"]"#);
     }
 }

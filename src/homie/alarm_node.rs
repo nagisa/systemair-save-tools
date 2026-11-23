@@ -1,66 +1,109 @@
-//! Exposes the current device alarms as properties.
+//! Exposes the device alarms as a list of the active ones.
 //!
-//! The SystemAIR units keep track of two bits worth of information for each alarm (except
-//! summaries):
+//! The SystemAIR units keep two bits of information for each alarm: whether it is firing, and
+//! whether it is pending a change to the other state. A firing alarm that has been cleared stays
+//! firing ("acknowledged") until its condition goes away, and a clear alarm whose condition has
+//! appeared is "evaluating" until it fires. `active` lists the alarms that are firing, including
+//! the acknowledged ones.
 //!
-//! * Whether the alarm is firing or not
-//! * Whether the alarm is "pending" for the other state (in case of a firing alarm, clearing it
-//!   does not immediately make it go away -- instead it goes into the state "firing but cleared".)
-//!
-//! This maps okay to the `$target` mechanism exposed in Homie and so most of the alarms have an
-//! `$target` property associated with them.
+//! The alarm registers are many, but change rarely. `count` follows the number of active alarms,
+//! and a change in it re-reads all the alarm registers, so polling `alarm/count` frequently is
+//! enough to notice alarms promptly.
 
-// TODO: alarm log?
-
-use crate::homie::EventResult;
-use crate::homie::node::{Node, PropertyEntry};
+use crate::connection::Connection;
+use crate::homie::node::{Node, PropertyEntry, PropertyKind};
 use crate::homie::value::{
-    AggregatePropertyValue, PropertyDescription, PropertyValue, string_enum,
+    ActionPropertyValue, DynPropertyValue, PropertyDescription, PropertyValue, unit,
 };
+use crate::homie::{EventResult, EventStream};
 use crate::modbus;
+use crate::modbus_device_cache::ModbusDeviceValues;
 use crate::registers::{RegisterIndex, Value};
 use homie5::device_description::{
-    HomieNodeDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
+    HomieNodeDescription, HomiePropertyDescription, HomiePropertyFormat, PropertyDescriptionBuilder,
 };
 use homie5::{HomieDataType, HomieID};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::pin::Pin;
+use std::sync::Arc;
 
 super::node::properties! { static PROPERTIES = [
-     { "any": AlarmOutputValue = register "OUTPUT_ALARM" },
-     { "supply-air-fan-control": AlarmValue = aggregate "ALARM_SAF_CTRL_ALARM" },
-     { "extract-air-fan-control": AlarmValue = aggregate "ALARM_EAF_CTRL_ALARM" },
-     { "frost-protection": AlarmValue = aggregate "ALARM_FROST_PROT_ALARM" },
-     { "defrosting": AlarmValue = aggregate "ALARM_DEFROSTING_ALARM" },
-     { "supply-air-fan-rpm": AlarmValue = aggregate "ALARM_SAF_RPM_ALARM" },
-     { "extract-air-fan-rpm": AlarmValue = aggregate "ALARM_EAF_RPM_ALARM" },
-     { "frost-protection-sensor": AlarmValue = aggregate "ALARM_FPT_ALARM" },
-     { "outdoor-air-temperature": AlarmValue = aggregate "ALARM_OAT_ALARM" },
-     { "supply-air-temperature": AlarmValue = aggregate "ALARM_SAT_ALARM" },
-     { "room-air-temperature": AlarmValue = aggregate "ALARM_RAT_ALARM" },
-     { "extract-air-temperature": AlarmValue = aggregate "ALARM_EAT_ALARM" },
-     { "extra-controller-temperature": AlarmValue = aggregate "ALARM_ECT_ALARM" },
-     // TODO: de-TLA this name
-     { "eft": AlarmValue = aggregate "ALARM_EFT_ALARM" },
-     { "overheat-protection-sensor": AlarmValue = aggregate "ALARM_OHT_ALARM" },
-     { "emergency-thermostat": AlarmValue = aggregate "ALARM_EMT_ALARM" },
-     { "rotor-guard": AlarmValue = aggregate "ALARM_RGS_ALARM" },
-     { "bypass-damper-position-sensor": AlarmValue = aggregate "ALARM_BYS_ALARM" },
-     { "secondary-air": AlarmValue = aggregate "ALARM_SECONDARY_AIR_ALARM" },
-     { "filter": AlarmValue = aggregate "ALARM_FILTER_ALARM" },
-     { "extra-controller": AlarmValue = aggregate "ALARM_EXTRA_CONTROLLER_ALARM" },
-     { "external-stop": AlarmValue = aggregate "ALARM_EXTERNAL_STOP_ALARM" },
-     { "relative-humidity": AlarmValue = aggregate "ALARM_RH_ALARM" },
-     { "co2": AlarmValue = aggregate "ALARM_CO2_ALARM" },
-     { "low-supply-air-temperature": AlarmValue = aggregate "ALARM_LOW_SAT_ALARM" },
-     { "bypass-damper-feedback": AlarmValue = aggregate "ALARM_BYF_ALARM" },
-     { "manual-override-outputs": AlarmValue = aggregate "ALARM_MANUAL_OVERRIDE_OUTPUTS_ALARM" },
-     { "pdm-room-humidity-sensor": AlarmValue = aggregate "ALARM_PDM_RHS_ALARM" }, // PDM = pulse density modulation
-     { "pdm-extract-room-temperature": AlarmValue = aggregate "ALARM_PDM_EAT_ALARM" },
-     { "manual-fan-stop": AlarmValue = aggregate "ALARM_MANUAL_FAN_STOP_ALARM" },
-     { "overheat-temperature": AlarmValue = aggregate "ALARM_OVERHEAT_TEMPERATURE_ALARM" },
-     { "fire": AlarmValue = aggregate "ALARM_FIRE_ALARM_ALARM" },
-     { "filter-warning": AlarmValue = aggregate "ALARM_FILTER_WARNING_ALARM" },
+    { "active": ActiveAlarms = kind &ActiveAlarmsKind },
+    { "count": AlarmCount = register "ALARM_AMOUNT_ACTIVE" },
+    { "clear": ClearAction = action },
 ] }
+
+const fn register(name: &str) -> RegisterIndex {
+    RegisterIndex::from_name(name).unwrap()
+}
+
+const ALARMS: [(&str, RegisterIndex); 33] = [
+    ("supply-air-fan-control", register("ALARM_SAF_CTRL_ALARM")),
+    ("extract-air-fan-control", register("ALARM_EAF_CTRL_ALARM")),
+    ("frost-protection", register("ALARM_FROST_PROT_ALARM")),
+    ("defrosting", register("ALARM_DEFROSTING_ALARM")),
+    ("supply-air-fan-rpm", register("ALARM_SAF_RPM_ALARM")),
+    ("extract-air-fan-rpm", register("ALARM_EAF_RPM_ALARM")),
+    ("frost-protection-sensor", register("ALARM_FPT_ALARM")),
+    ("outdoor-air-temperature", register("ALARM_OAT_ALARM")),
+    ("supply-air-temperature", register("ALARM_SAT_ALARM")),
+    ("room-air-temperature", register("ALARM_RAT_ALARM")),
+    ("extract-air-temperature", register("ALARM_EAT_ALARM")),
+    ("extra-controller-temperature", register("ALARM_ECT_ALARM")),
+    ("efficiency-temperature", register("ALARM_EFT_ALARM")),
+    ("overheat-protection-sensor", register("ALARM_OHT_ALARM")),
+    ("emergency-thermostat", register("ALARM_EMT_ALARM")),
+    ("rotor-guard", register("ALARM_RGS_ALARM")),
+    ("bypass-damper-position-sensor", register("ALARM_BYS_ALARM")),
+    ("secondary-air", register("ALARM_SECONDARY_AIR_ALARM")),
+    ("filter", register("ALARM_FILTER_ALARM")),
+    ("extra-controller", register("ALARM_EXTRA_CONTROLLER_ALARM")),
+    ("external-stop", register("ALARM_EXTERNAL_STOP_ALARM")),
+    ("relative-humidity", register("ALARM_RH_ALARM")),
+    ("co2", register("ALARM_CO2_ALARM")),
+    ("low-supply-air-temperature", register("ALARM_LOW_SAT_ALARM")),
+    ("bypass-damper-feedback", register("ALARM_BYF_ALARM")),
+    ("manual-override-outputs", register("ALARM_MANUAL_OVERRIDE_OUTPUTS_ALARM")),
+    ("pdm-room-humidity-sensor", register("ALARM_PDM_RHS_ALARM")),
+    ("pdm-extract-room-temperature", register("ALARM_PDM_EAT_ALARM")),
+    ("manual-fan-stop", register("ALARM_MANUAL_FAN_STOP_ALARM")),
+    ("overheat-temperature", register("ALARM_OVERHEAT_TEMPERATURE_ALARM")),
+    ("fire", register("ALARM_FIRE_ALARM_ALARM")),
+    ("filter-warning", register("ALARM_FILTER_WARNING_ALARM")),
+    ("heater-malfunction", register("ALARM_HEATER_MALFUNCTION_ALARM")),
+];
+
+static ALARM_REGISTERS: [RegisterIndex; ALARMS.len()] = {
+    let mut registers = [ALARMS[0].1; ALARMS.len()];
+    let mut i = 0;
+    while i < ALARMS.len() {
+        registers[i] = ALARMS[i].1;
+        i += 1;
+    }
+    registers
+};
+
+/// Read all the alarm registers, in as few requests as possible.
+fn read_alarms(modbus: Arc<Connection>) -> Pin<Box<EventStream>> {
+    let mut addresses: Vec<u16> = ALARM_REGISTERS.iter().map(|r| r.address()).collect();
+    addresses.sort();
+    let mut ranges: Vec<(u16, u16)> = Vec::new();
+    for address in addresses {
+        match ranges.last_mut() {
+            Some((start, count)) if address - *start < modbus::MAX_SAFE_READ_COUNT => {
+                *count = address - *start + 1;
+            }
+            _ => ranges.push((address, 1)),
+        }
+    }
+    Box::pin(async_stream::stream! {
+        for (address, count) in ranges {
+            let operation = modbus::Operation::GetHoldings { address, count };
+            let response = modbus.send_retrying(operation.clone()).await?.kind;
+            yield Ok(EventResult::Periodic { operation, response });
+        }
+    })
+}
 
 pub struct AlarmNode {}
 
@@ -79,155 +122,181 @@ impl Node for AlarmNode {
             .iter()
             .map(|prop| (prop.prop_id.clone(), prop.description()))
             .collect::<BTreeMap<_, _>>();
-        HomieNodeDescription {
-            name: Some("device alarm management".to_string()),
-            r#type: None,
-            properties,
-        }
+        HomieNodeDescription { name: Some("device alarms".to_string()), r#type: None, properties }
     }
 
     fn properties(&self) -> &'static [super::node::PropertyEntry] {
         &PROPERTIES
     }
-
-    // fn on_property_change(
-    //     &self,
-    //     _: HomieID,
-    //     prop_idx: usize,
-    //     modbus: std::sync::Arc<crate::connection::Connection>,
-    //     _: Box<super::value::DynPropertyValue>,
-    // ) -> std::pin::Pin<Box<super::EventStream>> {
-    // }
 }
 
-string_enum! {
-#[impl(TryFromValue)]
-#[derive(Copy, Clone, PartialEq)]
-#[repr(u16)]
-pub enum AlarmValue {
-    Clear = 0,
-    Firing = 1,
-    Evaluating = 2,
-    Acknowledged = 3,
-}
-}
+/// The names of the firing alarms, sorted.
+pub(crate) struct ActiveAlarms(BTreeSet<&'static str>);
 
-impl AlarmValue {
-    fn new(current: Value) -> Result<Self, ()> {
-        current.try_into()
-    }
-}
-
-impl PropertyValue for AlarmValue {
+impl PropertyValue for ActiveAlarms {
     fn value(&self) -> String {
-        match self {
-            AlarmValue::Clear | AlarmValue::Evaluating => "clear",
-            AlarmValue::Firing | AlarmValue::Acknowledged => "firing",
-        }
-        .to_string()
-    }
-
-    fn target(&self) -> Option<String> {
-        Some(
-            match self {
-                AlarmValue::Clear | AlarmValue::Acknowledged => "clear",
-                AlarmValue::Firing | AlarmValue::Evaluating => "firing",
-            }
-            .to_string(),
-        )
+        serde_json::to_string(&self.0).expect("a list of strings serializes")
     }
 }
 
-impl AggregatePropertyValue for AlarmValue {
-    const SETTABLE: bool = true;
-    fn set(
-        &self,
-        node_id: HomieID,
-        prop_idx: usize,
-        modbus: std::sync::Arc<crate::connection::Connection>,
-    ) -> std::pin::Pin<Box<super::EventStream>> {
-        let is_clear = *self == AlarmValue::Clear;
-        Box::pin(async_stream::stream! {
-            if !is_clear {
-                // If you'd like to break something, you still can: try manual override registers!
-                let why = "can only clear alarms, why would you want something to be broken?";
-                yield Ok(EventResult::HomieNotSet { node_id, prop_idx, why });
-                return;
-            }
-            // All alarm clear registers are + 1 of the register itself.
-            let address = PROPERTIES[prop_idx].kind.registers()[0].address() + 1;
-            let operation = modbus::Operation::SetHoldings { address, values: vec![1] };
-            let response = modbus.send_retrying(operation.clone()).await?;
-            if response.exception_code().is_some() {
-                yield Ok(EventResult::HomieSet {
-                    node_id: node_id.clone(),
-                    prop_idx,
-                    operation,
-                    response: response.kind,
-                });
-            }
-            let address = address - 1;
-            let operation = modbus::Operation::GetHoldings { address, count: 1 };
-            let response = modbus.send_retrying(operation.clone()).await?.kind;
-            yield Ok(EventResult::HomieSet { node_id, prop_idx, operation, response });
-        })
-    }
-}
-
-impl PropertyDescription for AlarmValue {
-    fn description(_: &PropertyEntry) -> homie5::device_description::HomiePropertyDescription {
-        let alarm_property_format =
-            HomiePropertyFormat::Enum(vec!["clear".to_string(), "firing".to_string()]);
-        PropertyDescriptionBuilder::new(HomieDataType::Enum)
-            .format(alarm_property_format.clone())
+impl PropertyDescription for ActiveAlarms {
+    fn description(_: &PropertyEntry) -> HomiePropertyDescription {
+        let schema = r#"{"type":"array","items":{"type":"string"}}"#;
+        PropertyDescriptionBuilder::new(HomieDataType::JSON)
+            .format(HomiePropertyFormat::Json(schema.to_string()))
             .build()
     }
 }
 
-string_enum! {
-#[impl(TryFromValue, PropertyDescription, RegisterPropertyValue)]
-#[derive(Copy, Clone)]
-#[repr(u16)]
-pub enum AlarmOutputValue {
-    Clear = 0,
-    Firing = 1,
-}
-}
+pub(crate) struct ActiveAlarmsKind;
 
-impl PropertyValue for AlarmOutputValue {
-    fn value(&self) -> String {
-        <&'static str>::from(self).to_string()
+impl PropertyKind for ActiveAlarmsKind {
+    fn registers(&self) -> &[RegisterIndex] {
+        &ALARM_REGISTERS
     }
+
+    fn value_from_modbus(
+        &self,
+        modbus: &ModbusDeviceValues,
+    ) -> Option<Result<Box<DynPropertyValue>, ()>> {
+        let mut active = BTreeSet::new();
+        for (name, register) in ALARMS {
+            // 0 = clear, 1 = firing, 2 = clear but evaluating, 3 = firing but acknowledged.
+            match modbus.value_of(register)?.into_inner() {
+                0 | 2 => {}
+                1 | 3 => {
+                    active.insert(name);
+                }
+                _ => return Some(Err(())),
+            }
+        }
+        Some(Ok(Box::new(ActiveAlarms(active))))
+    }
+
+    fn value_from_homie(&self, _: &str) -> Result<Box<DynPropertyValue>, ()> {
+        Err(())
+    }
+
+    fn homie_set_to_modbus(
+        &self,
+        _: HomieID,
+        _: usize,
+        _: Arc<Connection>,
+        _: Box<DynPropertyValue>,
+    ) -> Pin<Box<EventStream>> {
+        unreachable!("the list of active alarms is not settable")
+    }
+
     fn on_property_change(
         &self,
-        _node_id: HomieID,
+        _: HomieID,
+        _: usize,
+        _: Arc<Connection>,
+        _: Box<DynPropertyValue>,
+    ) -> Pin<Box<EventStream>> {
+        Box::pin(futures::stream::empty())
+    }
+
+    fn adjust_description(&self, description: &mut HomiePropertyDescription) {
+        description.retained = true;
+        description.settable = false;
+    }
+}
+
+pub(crate) struct AlarmCount(u16);
+
+impl TryFrom<Value> for AlarmCount {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Ok(Self(value.into_inner()))
+    }
+}
+
+impl TryFrom<&str> for AlarmCount {
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Self(value.parse().map_err(|_| ())?))
+    }
+}
+
+impl PropertyValue for AlarmCount {
+    fn value(&self) -> String {
+        self.0.to_string()
+    }
+
+    fn on_property_change(
+        &self,
+        _: HomieID,
+        _: usize,
+        modbus: Arc<Connection>,
+    ) -> Pin<Box<EventStream>> {
+        read_alarms(modbus)
+    }
+}
+
+impl crate::homie::value::RegisterPropertyValue for AlarmCount {
+    fn to_modbus(&self) -> u16 {
+        self.0
+    }
+}
+
+impl PropertyDescription for AlarmCount {
+    fn description(prop: &PropertyEntry) -> HomiePropertyDescription {
+        crate::homie::value::UintValue::<unit::None>::description(prop)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ClearAction;
+
+impl PropertyValue for ClearAction {
+    fn value(&self) -> String {
+        "all".to_string()
+    }
+}
+
+impl PropertyDescription for ClearAction {
+    fn description(_: &PropertyEntry) -> HomiePropertyDescription {
+        PropertyDescriptionBuilder::new(HomieDataType::Enum)
+            .format(HomiePropertyFormat::Enum(vec!["all".into()]))
+            .build()
+    }
+}
+
+impl TryFrom<&str> for ClearAction {
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        (value == "all").then_some(ClearAction).ok_or(())
+    }
+}
+
+impl ActionPropertyValue for ClearAction {
+    fn invoke(
+        &self,
+        node_id: HomieID,
         prop_idx: usize,
-        modbus: std::sync::Arc<crate::connection::Connection>,
-    ) -> std::pin::Pin<Box<super::EventStream>> {
-        // if `alarm/any` changed, lets do an immediate read-out of all alarm registers so that
-        // we report them immediately? This means that at least for alarms a valid configuration
-        // would be to have a really rare global poll rate and a frequent rate for just
-        // `alarm/any`.
-        if PROPERTIES[prop_idx].prop_id.as_str() == "any" {
-            Box::pin(async_stream::stream! {
-                let register = const {RegisterIndex::from_name("ALARM_SAF_CTRL_ALARM").unwrap()};
-                let address = register.address();
-                let operation = modbus::Operation::GetHoldings { address, count: 119 };
-                let response = modbus.send_retrying(operation.clone()).await?.kind;
-                yield Ok(EventResult::Periodic { operation, response });
-                let register = const {RegisterIndex::from_name("ALARM_BYS_ALARM").unwrap()};
-                let address = register.address();
-                let operation = modbus::Operation::GetHoldings { address, count: 57 };
-                let response = modbus.send_retrying(operation.clone()).await?.kind;
-                yield Ok(EventResult::Periodic { operation, response });
-                let register = const {RegisterIndex::from_name("ALARM_MANUAL_OVERRIDE_OUTPUTS_ALARM").unwrap()};
-                let address = register.address();
-                let operation = modbus::Operation::GetHoldings { address, count: 42 };
-                let response = modbus.send_retrying(operation.clone()).await?.kind;
-                yield Ok(EventResult::Periodic { operation, response });
-            })
-        } else {
-            Box::pin(futures::stream::empty())
-        }
+        modbus: Arc<Connection>,
+    ) -> Pin<Box<EventStream>> {
+        Box::pin(async_stream::stream! {
+            let address = const { register("ALARM_CLEAR_ALL") }.address();
+            let operation = modbus::Operation::SetHoldings { address, values: vec![1] };
+            let response = modbus.send_retrying(operation).await?;
+            if response.exception_code().is_some() {
+                yield Ok(EventResult::ActionFailure {
+                    node_id,
+                    prop_idx,
+                    why: "the device refused to clear the alarms",
+                });
+                return;
+            }
+            yield Ok(EventResult::ActionResponse { node_id, prop_idx, value: Box::new(Self) });
+            let address = const { register("ALARM_AMOUNT_ACTIVE") }.address();
+            let operation = modbus::Operation::GetHoldings { address, count: 1 };
+            let response = modbus.send_retrying(operation.clone()).await?.kind;
+            yield Ok(EventResult::Periodic { operation, response });
+            for await result in read_alarms(modbus) {
+                yield result;
+            }
+        })
     }
 }
