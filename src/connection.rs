@@ -21,6 +21,8 @@ pub enum Error {
     LookupHost(#[source] std::io::Error, String),
     #[error("could not connect to `{1}` over TCP")]
     Connect(#[source] std::io::Error, String),
+    #[error("connecting to `{0}` timed out")]
+    ConnectTimeout(String),
     #[error("could not open {1:?} for reading and writing")]
     OpenDevice(#[source] std::io::Error, PathBuf),
     #[error("scheduling a request failed")]
@@ -45,6 +47,10 @@ pub enum Error {
 const MAX_WAIT_DURATION: std::time::Duration = std::time::Duration::from_secs(15);
 /// The minimum amount of time between the starts of two subsequent connection attempts.
 const RECONNECT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
+/// How long a connection attempt (lookup and TCP handshake) may take. Together with
+/// `RECONNECT_INTERVAL` it bounds how long requests wait while the device is unreachable, which
+/// has to stay well below `MAX_WAIT_DURATION`.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Keeps track of the requests that are waiting for their response.
 ///
@@ -79,6 +85,11 @@ impl ResponseTracker {
         let previous = state.waiters.insert(transaction_id, sender);
         debug_assert!(previous.is_none(), "transaction ID {transaction_id} is already in use");
         Ok(Waiter { tracker: self, transaction_id, receiver })
+    }
+
+    /// Whether anybody is still waiting for the response to this request.
+    fn is_waiting(&self, transaction_id: u16) -> bool {
+        self.lock().waiters.contains_key(&transaction_id)
     }
 
     pub fn mark_timeout(&self, transaction_id: u16) {
@@ -389,6 +400,12 @@ impl TcpWorker {
                         message = "could not reconnect, will retry",
                         error = %Chain(&e)
                     );
+                    // Nothing can be sent until the device is reachable again. Time the queued
+                    // requests out now rather than leaving them waiting for an unknown amount of
+                    // time. Requests retried from here on wait for the next attempt.
+                    while let Ok(req) = jobs.try_recv() {
+                        self.responses.mark_timeout(req.transaction_id);
+                    }
                     continue 'reconnect;
                 }
                 Err(e) => return Err(e),
@@ -476,6 +493,13 @@ impl TcpWorker {
                                     return Ok(());
                                 }
                             },
+                            // Its requester has given up already, e.g. while the connection was down.
+                            Some(req) if !self.responses.is_waiting(req.transaction_id) => {
+                                trace!(
+                                    message = "dropping a request nobody waits for",
+                                    transaction = req.transaction_id
+                                );
+                            }
                             Some(req) => {
                                 // While we're sending, use `send_time` to track send timeout.
                                 send_time.as_mut().reset(Instant::now() + *self.args.send_timeout);
@@ -499,14 +523,19 @@ impl TcpWorker {
     async fn connect(&mut self) -> Result<TcpIo, Error> {
         let address = self.args.how.tcp.as_ref().unwrap();
         info!(message = "connecting...", address);
-        let addresses = tokio::net::lookup_host(address)
+        let connect = async {
+            let addresses = tokio::net::lookup_host(address)
+                .await
+                .map_err(|e| Error::LookupHost(e, address.to_string()))?
+                .collect::<Vec<_>>();
+            debug!(message = "resolved", ?addresses);
+            TcpStream::connect(&*addresses)
+                .await
+                .map_err(|e| Error::Connect(e, address.to_string()))
+        };
+        let socket = tokio::time::timeout(CONNECT_TIMEOUT, connect)
             .await
-            .map_err(|e| Error::LookupHost(e, address.to_string()))?
-            .collect::<Vec<_>>();
-        debug!(message = "resolved", ?addresses);
-        let socket = TcpStream::connect(&*addresses)
-            .await
-            .map_err(|e| Error::Connect(e, address.to_string()))?;
+            .map_err(|_| Error::ConnectTimeout(address.to_string()))??;
         let nodelay_result = socket.set_nodelay(true);
         trace!(message = "setting nodelay", is_error = ?nodelay_result.err());
         info!(message = "connected");
@@ -557,5 +586,36 @@ impl TcpWorker {
             request_timeout.reset(*timeout);
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser as _;
+
+    #[derive(clap::Parser)]
+    struct TestArgs {
+        #[clap(flatten)]
+        connection: Args,
+    }
+
+    /// Requests sent while the device is unreachable are answered (as timed out) by the reconnect
+    /// loop, not left for the waiter's last-resort timeout.
+    #[tokio::test]
+    async fn requests_while_unreachable_time_out_promptly() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let args = TestArgs::parse_from(["test", "--tcp", &address, "--device-id", "1"]).connection;
+        let connection = Connection::new(args).await.unwrap();
+        // Accept the first connection, then go away entirely so that reconnecting fails.
+        let (socket, _) = listener.accept().await.unwrap();
+        drop(socket);
+        drop(listener);
+        let started = Instant::now();
+        let operation = modbus::Operation::GetHoldings { address: 1001, count: 1 };
+        let response = connection.send(operation).await.unwrap();
+        assert!(response.is_none());
+        assert!(started.elapsed() < MAX_WAIT_DURATION, "took {:?}", started.elapsed());
     }
 }
