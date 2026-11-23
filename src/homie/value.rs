@@ -163,6 +163,37 @@ impl<U> RegisterPropertyValue for UintValue<U> {
     }
 }
 
+pub(crate) struct IntValue<U = unit::None>(pub(crate) i16, PhantomData<U>);
+impl<U> TryFrom<Value> for IntValue<U> {
+    type Error = ();
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        Ok(Self(value.into_inner() as i16, PhantomData))
+    }
+}
+impl<U> TryFrom<&str> for IntValue<U> {
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Self(value.parse().map_err(|_| ())?, PhantomData))
+    }
+}
+impl<U: Send + Sync + 'static> PropertyValue for IntValue<U> {
+    fn value(&self) -> String {
+        self.0.to_string()
+    }
+}
+impl<U: unit::Unit> PropertyDescription for IntValue<U> {
+    fn description(_prop: &PropertyEntry) -> HomiePropertyDescription {
+        let mut d = PropertyDescriptionBuilder::new(HomieDataType::Integer).build();
+        d.unit = U::UNIT_STRING.map(|u| u.to_string());
+        d
+    }
+}
+impl<U> RegisterPropertyValue for IntValue<U> {
+    fn to_modbus(&self) -> u16 {
+        self.0 as u16
+    }
+}
+
 pub(crate) struct CelsiusValue(pub(crate) i16);
 impl TryFrom<Value> for CelsiusValue {
     type Error = ();

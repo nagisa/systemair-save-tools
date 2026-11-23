@@ -235,6 +235,8 @@ impl SystemAirDevice {
                     self.mqtt.homie_publish(p).await.map_err(Error::PublishStateInit)?;
                 }
                 homie5::DevicePublishStep::DeviceDescription => {
+                    self.description.name = Some(self.device_name().await?);
+                    self.description.update_version();
                     let p = self
                         .protocol
                         .publish_description(&self.description)
@@ -327,6 +329,38 @@ impl SystemAirDevice {
             }
         }
         Ok(())
+    }
+
+    /// `SystemAIR <model>: <serial>`, as far as the unit reports them.
+    async fn device_name(&self) -> Result<String, Error> {
+        let model = self.read_string("SYSTEM_UNIT_MODEL1", 40).await?;
+        let serial = self.read_string("SYSTEM_SERIAL_NUMBER1", 50).await?;
+        let model = if model.is_empty() { "SAVE".to_string() } else { model };
+        Ok(if serial.is_empty() {
+            format!("SystemAIR {model}")
+        } else {
+            format!("SystemAIR {model}: {serial}")
+        })
+    }
+
+    /// A string the unit stores one character per register, up to the first NUL.
+    async fn read_string(&self, first: &str, count: u16) -> Result<String, Error> {
+        let address = crate::registers::RegisterIndex::from_name(first).unwrap().address();
+        let operation = Operation::GetHoldings { address, count };
+        let response =
+            self.modbus.send_retrying(operation).await.map_err(Error::ModbusStreamError)?;
+        let ResponseKind::GetHoldings { values } = response.kind else {
+            return Ok(String::new());
+        };
+        let text: String = values
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|word| u16::from_be_bytes(*word))
+            .take_while(|&c| c != 0)
+            .filter_map(|c| char::from_u32(u32::from(c)))
+            .collect();
+        Ok(text.trim().trim_matches('"').trim().to_string())
     }
 
     fn schedule_periodic_read(&mut self, address: u16, count: u16, period: Duration) {
