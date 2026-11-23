@@ -2,6 +2,7 @@ use crate::homie::EventResult;
 use crate::homie::node::{Node, PropertyEntry};
 use crate::homie::value::{
     AggregatePropertyValue, BooleanValue, CelsiusValue, PropertyDescription, PropertyValue,
+    string_enum,
 };
 use crate::modbus;
 use crate::registers::Value;
@@ -18,6 +19,7 @@ super::node::properties! { static PROPERTIES = [
      { "start-time": TimeValue = aggregate "FREE_COOLING_START_TIME_H", "FREE_COOLING_START_TIME_M" },
      { "end-time": TimeValue = aggregate "FREE_COOLING_END_TIME_H", "FREE_COOLING_END_TIME_M" },
      { "active": BooleanValue = register "FREE_COOLING_ACTIVE" },
+     { "state": FreeCoolingState = register "FREE_COOLING_STATE" },
 ] }
 
 pub struct FreeCoolingNode {}
@@ -98,5 +100,17 @@ impl TryFrom<&str> for TimeValue {
     type Error = jiff::Error;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Ok(Self(value.parse()?))
+    }
+}
+
+string_enum! {
+    #[impl(TryFromValue, PropertyValue, RegisterPropertyValue, PropertyDescription)]
+    #[repr(u16)]
+    #[derive(Clone, Copy)]
+    enum FreeCoolingState {
+        Disabled = 0,
+        Enabled = 1,
+        Daytime = 2,
+        UnreliableTemperatures = 3,
     }
 }

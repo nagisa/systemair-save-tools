@@ -9,6 +9,7 @@ super::node::properties! { static PROPERTIES = [
     // NOTE: although this is a generic output register, the modbus register documentation
     // specifies that this is specifically a heat exchanger AO value.
     { "current-speed": UintValue<unit::Percent> = register "OUTPUT_Y2_ANALOG" },
+    { "demand": UintValue<unit::Percent> = register "HEAT_EXCHANGER_FROM_SATC" },
     { "defrosting-active": BooleanValue = register "FUNCTION_ACTIVE_DEFROSTING" },
     { "enable-cooling-recovery": BooleanValue = register "HEAT_EXCHANGER_COOLING_RECOVERY_ON_OFF" },
     { "cooling-recovery-limit": CelsiusValue = register "COOLER_RECOVERY_LIMIT_T" },
